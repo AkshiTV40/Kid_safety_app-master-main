@@ -1,0 +1,1 @@
+{"camera_running":true,"device_id":"raspi"}

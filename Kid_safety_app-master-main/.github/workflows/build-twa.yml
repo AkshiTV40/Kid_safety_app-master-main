@@ -1,0 +1,97 @@
+name: Build TWA (Bubblewrap)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-twa:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      - name: Setup Android SDK
+        uses: r0adkll/setup-android@v2
+        with:
+          api-levels: 31
+          build-tools: 31.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Bubblewrap CLI
+        run: npm i -g @bubblewrap/cli
+
+      - name: Prepare keystore
+        env:
+          KEYSTORE_JKS: ${{ secrets.KEYSTORE_JKS }}
+        run: |
+          if [ -z "$KEYSTORE_JKS" ]; then echo "No KEYSTORE_JKS secret provided"; exit 1; fi
+          echo "$KEYSTORE_JKS" | base64 --decode > release.keystore
+
+      - name: Init Bubblewrap (non-interactive)
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          PACKAGE_ID: ${{ secrets.PACKAGE_ID }}
+          APP_NAME: ${{ secrets.APP_NAME }}
+          APP_SHORT_NAME: ${{ secrets.APP_SHORT_NAME }}
+          APP_VERSION_CODE: ${{ secrets.APP_VERSION_CODE }}
+          APP_VERSION_NAME: ${{ secrets.APP_VERSION_NAME }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$SITE_URL" ]; then echo "Set SITE_URL secret"; exit 1; fi
+          npx @bubblewrap/cli init \
+            --manifest-url "$SITE_URL/manifest.json" \
+            --packageId "$PACKAGE_ID" \
+            --name "$APP_NAME" \
+            --shortName "$APP_SHORT_NAME" \
+            --appVersionCode "$APP_VERSION_CODE" \
+            --appVersionName "$APP_VERSION_NAME" \
+            --startUrl "/" \
+            --display standalone \
+            --backgroundColor "#FFFFFF" \
+            --themeColor "#000000" \
+            --non-interactive || true
+
+      - name: Configure signing
+        run: |
+          # Write signing configuration for Bubblewrap's project
+          cat > ./twa-signing.json <<'JSON'
+          {
+            "keystorePath": "release.keystore",
+            "keystorePassword": "${KEYSTORE_PASSWORD}",
+            "keyAlias": "${KEY_ALIAS}",
+            "keyPassword": "${KEY_PASSWORD}"
+          }
+          JSON
+
+      - name: Build AAB
+        run: npx @bubblewrap/cli build || true
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: twa-aab
+          path: build/*.aab || build/*.apk || build/**/outputs/**/*.aab || build/**/outputs/**/*.apk
+
+# Notes:
+# - This workflow is a template and may require adjustments for Bubblewrap flags and Android SDK versions.
+# - Add required repository secrets before running: SITE_URL, PACKAGE_ID, APP_NAME, APP_SHORT_NAME,
+#   APP_VERSION_CODE, APP_VERSION_NAME, KEYSTORE_JKS (base64), KEY_ALIAS, KEYSTORE_PASSWORD, KEY_PASSWORD.
+# - Optionally add GOOGLE_PLAY_SERVICE_ACCOUNT (base64) if you want to upload to Play Store via automation.

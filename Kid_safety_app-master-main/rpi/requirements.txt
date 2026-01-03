@@ -1,0 +1,19 @@
+# Requirements for the Raspberry Pi companion (used by rpi/app.py)
+# Install these into your project virtualenv (pip) on development machines, or prefer apt packages on Raspberry Pi for some items.
+
+Flask>=2.0
+requests
+python-dotenv
+# gpiozero provides GPIO button support. On Raspberry Pi prefer the OS package(s): python3-gpiozero python3-rpi.gpio
+# If you need it in a virtualenv you can also install via pip:
+# pip install gpiozero
+gpiozero
+
+# OpenCV: pip 'opencv-python-headless' may build from source on ARM and require many build deps.
+# On Raspberry Pi 4 it's recommended to install system OpenCV via apt: sudo apt install -y python3-opencv
+opencv-python-headless
+
+# Picamera2 is optional and Raspberry Pi–specific. It is typically installed via apt on Raspberry Pi OS:
+#   sudo apt update && sudo apt install -y python3-picamera2 libcamera-apps
+# If a pip wheel is available you can try 'pip install picamera2', but apt is the recommended path on Pi.
+# (This package is not required for USB webcams or OpenCV capture.)

@@ -1,0 +1,14 @@
+[Unit]
+Description=Guardian Keychain Raspberry Pi Service
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/guardian-keychain/rpi
+EnvironmentFile=/home/pi/guardian-keychain/rpi/.env
+ExecStart=/home/pi/guardian-keychain/rpi/.venv/bin/python /home/pi/guardian-keychain/rpi/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+{
+  "appId": "com.akshitv.kidsafety",
+  "appName": "Kid Safety",
+  "webDir": "out",
+  "bundledWebRuntime": false
+}

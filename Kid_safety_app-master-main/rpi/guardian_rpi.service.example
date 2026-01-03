@@ -1,0 +1,18 @@
+[Unit]
+Description=Guardian Keychain Raspberry Pi Service (example)
+After=network.target
+
+[Service]
+# Replace 'pi' with the user that should run the service
+User=pi
+# WorkingDirectory should be the rpi/ directory inside the project
+WorkingDirectory=/home/pi/guardian-keychain/rpi
+# EnvironmentFile points to the .env used by the service
+EnvironmentFile=/home/pi/guardian-keychain/rpi/.env
+# ExecStart should point to the venv python and the app.py
+ExecStart=/home/pi/guardian-keychain/rpi/.venv/bin/python /home/pi/guardian-keychain/rpi/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

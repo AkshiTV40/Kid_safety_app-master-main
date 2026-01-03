@@ -1,7 +1,6 @@
 # Kid Safety — Guardian Portal
 
 Public repository for the Kid Safety Guardian Portal (Next.js + PWA).
-Ring in your pocket
 
 Getting started
 

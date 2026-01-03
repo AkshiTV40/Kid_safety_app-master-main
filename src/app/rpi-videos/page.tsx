@@ -11,6 +11,7 @@ type Video = {
 
 export default function RPiVideosPage() {
   const [videos, setVideos] = useState<Video[]>([]);
+  const [playingVideo, setPlayingVideo] = useState<string | null>(null);
 
   const load = async () => {
     const RPI_URL =
@@ -34,6 +35,27 @@ export default function RPiVideosPage() {
     <div className="p-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">RPi Videos</h1>
 
+      {playingVideo && (
+        <div className="mb-6 p-4 border rounded-md bg-secondary/50">
+          <h2 className="text-lg font-semibold mb-2">Playing: {playingVideo}</h2>
+          <video
+            controls
+            className="w-full max-w-2xl"
+            src={`${process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000"}/videos/${encodeURIComponent(playingVideo)}`}
+          >
+            Your browser does not support the video tag.
+          </video>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPlayingVideo(null)}
+            className="mt-2"
+          >
+            Close Player
+          </Button>
+        </div>
+      )}
+
       {videos.length === 0 ? (
         <p className="text-muted-foreground">No videos from RPi yet.</p>
       ) : (
@@ -49,20 +71,29 @@ export default function RPiVideosPage() {
                   </div>
                 </div>
 
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    const RPI_URL =
-                      process.env.NEXT_PUBLIC_RPI_URL ||
-                      "http://localhost:8000";
-                    window.open(
-                      `${RPI_URL}/videos/${encodeURIComponent(v.filename)}`,
-                      "_blank"
-                    );
-                  }}
-                >
-                  Download
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPlayingVideo(v.filename)}
+                  >
+                    Play
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const RPI_URL =
+                        process.env.NEXT_PUBLIC_RPI_URL ||
+                        "http://localhost:8000";
+                      window.open(
+                        `${RPI_URL}/videos/${encodeURIComponent(v.filename)}`,
+                        "_blank"
+                      );
+                    }}
+                  >
+                    Download
+                  </Button>
+                </div>
               </div>
             </div>
           ))}

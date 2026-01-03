@@ -370,7 +370,7 @@ export default function GuardianKeychain() {
             </div>
             <Button
               onClick={startCall}
-              disabled={isLoading || guardianCount === 0}
+              disabled={isLoading}
               className="h-40 w-40 rounded-full bg-accent text-accent-foreground shadow-lg animate-pulse-strong flex flex-col gap-2 hover:bg-accent/90 disabled:animate-none"
               aria-label="Start Emergency Call"
             >

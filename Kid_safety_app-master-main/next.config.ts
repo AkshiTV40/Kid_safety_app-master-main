@@ -1,12 +1,3 @@
-const withPWA = require('next-pwa')({
-  dest: 'public',
-  register: true,
-  skipWaiting: true,
-  fallbacks: {
-    document: '/_offline',
-  },
-});
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Enable HTTPS support
@@ -15,7 +6,7 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  
+
   // Image optimization
   images: {
     remotePatterns: [
@@ -73,4 +64,4 @@ const nextConfig = {
   },
 };
 
-module.exports = withPWA(nextConfig);
+export default nextConfig;

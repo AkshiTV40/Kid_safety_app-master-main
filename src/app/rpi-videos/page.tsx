@@ -12,6 +12,7 @@ type Video = {
 export default function RPiVideosPage() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [playingVideo, setPlayingVideo] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const load = async () => {
     const RPI_URL =
@@ -27,13 +28,37 @@ export default function RPiVideosPage() {
     }
   };
 
+  const recordVideo = async () => {
+    const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+    setIsRecording(true);
+    try {
+      const res = await fetch(`${RPI_URL}/help`, { method: 'POST' });
+      if (!res.ok) throw new Error("Failed to start recording");
+      alert("Recording started on RPi. It will record for 30 seconds.");
+      // Reload videos after a delay to show the new recording
+      setTimeout(() => {
+        load();
+        setIsRecording(false);
+      }, 35000); // 30 seconds recording + some buffer
+    } catch (e) {
+      console.error("Failed to start recording", e);
+      alert("Failed to start recording. Make sure RPi is running.");
+      setIsRecording(false);
+    }
+  };
+
   useEffect(() => {
     load();
   }, []);
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">RPi Videos</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">RPi Videos</h1>
+        <Button onClick={recordVideo} disabled={isRecording}>
+          {isRecording ? "Recording..." : "Record Video"}
+        </Button>
+      </div>
 
       {playingVideo && (
         <div className="mb-6 p-4 border rounded-md bg-secondary/50">

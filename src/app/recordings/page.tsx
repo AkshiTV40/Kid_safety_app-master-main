@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { listRecordings, getRecording, deleteRecording } from '@/lib/recordings';
 import { Button } from '@/components/ui/button';
 import Thumbnail from './components/thumbnail';
 import Duration from './components/duration';
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import { ArrowLeft } from 'lucide-react';
 
 export default function RecordingsPage() {
   const { toast } = useToast();
@@ -65,7 +67,15 @@ export default function RecordingsPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Recordings</h1>
+      <div className="flex items-center gap-4 mb-4">
+        <Link href="/keychain">
+          <Button variant="ghost" size="sm">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+        </Link>
+        <h1 className="text-2xl font-bold">Recordings</h1>
+      </div>
       {recs.length === 0 ? (
         <p className="text-muted-foreground">No recordings yet. Use the Guardian card to start recording.</p>
       ) : (

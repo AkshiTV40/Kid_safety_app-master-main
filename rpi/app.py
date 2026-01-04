@@ -99,7 +99,7 @@ class CameraManager:
             ret, jpeg = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             if ret:
                 frame = jpeg.tobytes()
-            time.sleep(0.03)  # ~30fps throttle
+            time.sleep(0.1)  # ~10fps throttle for efficiency
         cap.release()
         frame = None
         self.running = False
@@ -185,7 +185,6 @@ class GPSManager:
                                 'lng': float(data_stream.TPV['lon']),
                                 'timestamp': int(time.time())
                             }
-                    time.sleep(1)
             except Exception as e:
                 print('GPS error:', e)
                 time.sleep(1)
@@ -195,28 +194,21 @@ class GPSManager:
 
 gps_mgr = GPSManager()
 
-def record_video(duration=30):
-    """Record video for given duration in seconds."""
+def record_video(duration=30, audio=False):
+    """Record video for given duration in seconds, with optional audio."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'{VIDEOS_DIR}/recording_{timestamp}.avi'
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    cap = cv2.VideoCapture(CAM_INDEX)
-    if not cap.isOpened():
-        print('Camera not available for recording')
-        return
-    fps = 20.0
-    frame_size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    out = cv2.VideoWriter(filename, fourcc, fps, frame_size)
-    start_time = time.time()
-    while time.time() - start_time < duration:
-        ret, frame = cap.read()
-        if ret:
-            out.write(frame)
+    filename = f'{VIDEOS_DIR}/recording_{timestamp}.mp4'
+    try:
+        import subprocess
+        cmd = ['libcamera-vid', '--output', filename, '--timeout', str(duration * 1000), '--width', '1920', '--height', '1080']
+        if audio:
+            cmd.extend(['--codec', 'libav', '--libav-format', 'mp4', '--libav-audio'])
         else:
-            break
-    cap.release()
-    out.release()
-    print(f'Video recorded: {filename}')
+            cmd.extend(['--codec', 'h264'])
+        subprocess.run(cmd, check=True)
+        print(f'Video recorded: {filename}')
+    except Exception as e:
+        print(f'Failed to record video: {e}')
 
 def start_recording_thread():
     t = threading.Thread(target=record_video, daemon=True)
@@ -351,22 +343,11 @@ def button_worker():
                 print('Failed to post to SERVER_URL', e)
 
     def on_power():
-        print('Power toggle pressed - toggling camera')
-        # Toggle camera by calling local endpoints first; fall back to direct control
-        try:
-            if camera_mgr.is_running():
-                requests.post(f'http://localhost:{STREAM_PORT}/camera/stop', timeout=2)
-            else:
-                requests.post(f'http://localhost:{STREAM_PORT}/camera/start', timeout=2)
-        except Exception:
-            # If local requests fail, call manager directly as a best-effort fallback
-            try:
-                if camera_mgr.is_running():
-                    camera_mgr.stop()
-                else:
-                    camera_mgr.start()
-            except Exception:
-                pass
+        print('Open app button pressed - starting camera and GPS')
+        if not camera_mgr.is_running():
+            camera_mgr.start()
+        if not gps_mgr.is_running():
+            gps_mgr.start()
 
     # Try to initialize the buttons. On non-Raspberry Pi systems this can raise a
     # BadPinFactory (or other) exception; handle that gracefully and continue.

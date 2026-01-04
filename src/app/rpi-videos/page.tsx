@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { ArrowLeft } from "lucide-react";
 
 type Video = {
   filename: string;
@@ -54,7 +56,15 @@ export default function RPiVideosPage() {
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">RPi Videos</h1>
+        <div className="flex items-center gap-4">
+          <Link href="/">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          <h1 className="text-2xl font-bold">RPi Videos</h1>
+        </div>
         <Button onClick={recordVideo} disabled={isRecording}>
           {isRecording ? "Recording..." : "Record Video"}
         </Button>

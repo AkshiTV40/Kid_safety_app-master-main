@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Phone, PhoneOff, MapPin, ShieldAlert, Wifi, BatteryFull, Loader2, Navigation, VideoOff, Users, AlertCircle, Video } from 'lucide-react';
+import { Phone, PhoneOff, MapPin, ShieldAlert, Wifi, BatteryFull, Loader2, Navigation, VideoOff, Users, AlertCircle, Video, Eye } from 'lucide-react';
 import { Logo } from '@/components/logo';
 import { runPanicDetection } from '@/app/actions';
 import type { DetectPanicAndAlertOutput } from '@/ai/flows/detect-panic-and-alert';
@@ -404,6 +404,12 @@ export default function GuardianKeychain() {
                 <Button asChild>
                   <Link href="/recordings" className="flex items-center gap-2">
                     <Video className="h-4 w-4" /> Recordings
+                  </Link>
+                </Button>
+
+                <Button asChild variant="outline">
+                  <Link href="/location" className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" /> Location
                   </Link>
                 </Button>
               </div>

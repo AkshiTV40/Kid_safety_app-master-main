@@ -14,9 +14,11 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { ArrowLeft } from 'lucide-react';
+import { reverseGeocode, formatAddress } from '../../lib/geocoding';
 
 export default function LocationPage() {
   const [loc, setLoc] = useState<{lat:number,lng:number,timestamp:number}|null>(null);
+  const [address, setAddress] = useState<string>('');
   const [error, setError] = useState<string|null>(null);
   const isMobile = useIsMobile();
 
@@ -26,12 +28,17 @@ export default function LocationPage() {
         const response = await fetch('http://192.168.5.168:8000/location');
         if (!response.ok) throw new Error('Failed to fetch location');
         const data = await response.json();
-        setLoc({
+        const newLoc = {
           lat: data.latitude,
           lng: data.longitude,
           timestamp: Date.now()
-        });
+        };
+        setLoc(newLoc);
         setError(null);
+
+        // Fetch address
+        const result = await reverseGeocode(newLoc.lat, newLoc.lng);
+        setAddress(result ? formatAddress(result) : 'Address not found');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       }
@@ -88,11 +95,12 @@ export default function LocationPage() {
             </SheetHeader>
             <Card>
               <CardHeader>
-                <CardTitle>Coordinates</CardTitle>
+                <CardTitle>Location Details</CardTitle>
               </CardHeader>
               <CardContent>
-                <p>Latitude: {loc.lat}</p>
-                <p>Longitude: {loc.lng}</p>
+                <p>Latitude: {loc.lat.toFixed(6)}</p>
+                <p>Longitude: {loc.lng.toFixed(6)}</p>
+                <p>Address: {address}</p>
                 <p>Last Updated: {new Date(loc.timestamp).toLocaleString()}</p>
                 <Button onClick={openInMaps} className="mt-2">Open in Maps</Button>
               </CardContent>

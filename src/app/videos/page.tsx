@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { ArrowLeft } from "lucide-react";
 
 type Video = {
   filename: string;
@@ -89,7 +91,15 @@ export default function VideosPage() {
       {/* Fixed Header */}
       <div className="fixed top-0 left-0 right-0 bg-background border-b p-4 z-10">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold">Videos</h1>
+          <div className="flex items-center gap-4">
+            <Link href="/">
+              <Button variant="ghost" size="sm">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+            </Link>
+            <h1 className="text-2xl font-bold">Videos</h1>
+          </div>
           {!isMobile && (
             <Button onClick={recordVideo} disabled={isRecording}>
               {isRecording ? "Recording..." : "Record Video"}

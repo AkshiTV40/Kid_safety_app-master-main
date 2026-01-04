@@ -1,16 +1,9 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { listenToLocation } from '../../lib/firebase';
+import Link from 'next/link';
 import LeafletMap from '../../components/leaflet-map';
 import { useIsMobile } from '../../hooks/use-mobile';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -20,19 +13,34 @@ import {
 } from '../../components/ui/sheet';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { ArrowLeft } from 'lucide-react';
 
 export default function LocationPage() {
-  const [childId, setChildId] = useState('child-1');
   const [loc, setLoc] = useState<{lat:number,lng:number,timestamp:number}|null>(null);
+  const [error, setError] = useState<string|null>(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    if (!childId) return;
-    const unsub = listenToLocation(childId, (data) => {
-      setLoc(data);
-    });
-    return () => { if (typeof unsub === 'function') unsub(); };
-  }, [childId]);
+    const fetchLocation = async () => {
+      try {
+        const response = await fetch('http://192.168.5.168:8000/location');
+        if (!response.ok) throw new Error('Failed to fetch location');
+        const data = await response.json();
+        setLoc({
+          lat: data.latitude,
+          lng: data.longitude,
+          timestamp: Date.now()
+        });
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    };
+
+    fetchLocation();
+    const interval = setInterval(fetchLocation, 5000); // Update every 5 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   const openInMaps = () => {
     if (!loc) return;
@@ -44,17 +52,15 @@ export default function LocationPage() {
     <div className="flex flex-col h-screen">
       {/* Top Bar */}
       <div className="flex items-center justify-between p-4 bg-white border-b">
-        <h1 className="text-xl font-semibold">Child Location</h1>
-        <Select value={childId} onValueChange={setChildId}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Select child" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="child-1">Child 1</SelectItem>
-            <SelectItem value="child-2">Child 2</SelectItem>
-            <SelectItem value="child-3">Child 3</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-4">
+          <Link href="/">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          <h1 className="text-xl font-semibold">Child Location</h1>
+        </div>
       </div>
 
       {/* Map Container */}
@@ -65,6 +71,11 @@ export default function LocationPage() {
           marker={loc}
           style={{ height: '100%' }}
         />
+        {error && (
+          <div className="absolute top-4 left-4 bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded">
+            Error: {error}
+          </div>
+        )}
       </div>
 
       {/* Bottom Sheet on Mobile */}
@@ -73,7 +84,7 @@ export default function LocationPage() {
           <SheetContent side="bottom" className="h-auto">
             <SheetHeader>
               <SheetTitle>Location Details</SheetTitle>
-              <SheetDescription>Current location information</SheetDescription>
+              <SheetDescription>Current location information from RPi</SheetDescription>
             </SheetHeader>
             <Card>
               <CardHeader>
@@ -82,7 +93,7 @@ export default function LocationPage() {
               <CardContent>
                 <p>Latitude: {loc.lat}</p>
                 <p>Longitude: {loc.lng}</p>
-                <p>Timestamp: {new Date(loc.timestamp).toLocaleString()}</p>
+                <p>Last Updated: {new Date(loc.timestamp).toLocaleString()}</p>
                 <Button onClick={openInMaps} className="mt-2">Open in Maps</Button>
               </CardContent>
             </Card>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 
-export default function LeafletMap({ center = [0,0], zoom = 13, marker }: { center?: [number,number], zoom?: number, marker?: {lat:number,lng:number} | null }){
+export default function LeafletMap({ center = [0,0], zoom = 13, marker, style }: { center?: [number,number], zoom?: number, marker?: {lat:number,lng:number} | null, style?: React.CSSProperties }){
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any | null>(null);
   useEffect(()=>{

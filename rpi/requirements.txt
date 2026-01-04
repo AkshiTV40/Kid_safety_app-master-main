@@ -13,6 +13,9 @@ gpiozero
 # On Raspberry Pi 4 it's recommended to install system OpenCV via apt: sudo apt install -y python3-opencv
 opencv-python-headless
 
+# GPS support
+gps3
+
 # Picamera2 is optional and Raspberry Pi–specific. It is typically installed via apt on Raspberry Pi OS:
 #   sudo apt update && sudo apt install -y python3-picamera2 libcamera-apps
 # If a pip wheel is available you can try 'pip install picamera2', but apt is the recommended path on Pi.

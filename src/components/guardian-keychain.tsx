@@ -332,7 +332,7 @@ export default function GuardianKeychain() {
   );
 
   return (
-    <Card className="w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden border-4 border-gray-200 dark:border-gray-800 bg-card">
+    <Card className="w-full rounded-3xl shadow-2xl overflow-hidden border-4 border-gray-200 dark:border-gray-800 bg-card">
       <CardHeader className="flex flex-row items-center justify-between p-3 bg-secondary/50">
         <div className="flex items-center gap-2">
           <Logo className="h-6 w-6 text-primary" />

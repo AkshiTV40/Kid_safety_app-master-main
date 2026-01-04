@@ -15,6 +15,10 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 import requests
 import cv2
 from dotenv import load_dotenv
+try:
+    import gps3
+except ImportError:
+    gps3 = None
 
 try:
     from gpiozero import Button
@@ -36,6 +40,7 @@ os.makedirs(VIDEOS_DIR, exist_ok=True)
 app = Flask(__name__)
 
 frame = None
+location = None
 
 # Camera manager: supports OpenCV (USB webcams) and optional picamera2 (official Pi camera module)
 class CameraManager:
@@ -136,6 +141,60 @@ class CameraManager:
 
 camera_mgr = CameraManager()
 
+# GPS manager
+class GPSManager:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.running = False
+        self._stop = threading.Event()
+
+    def start(self):
+        if self.running or gps3 is None:
+            return
+        self._stop.clear()
+        t = threading.Thread(target=self._gps_loop, daemon=True)
+        t.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def is_running(self):
+        return self.running
+
+    def _gps_loop(self):
+        global location
+        try:
+            gps_socket = gps3.GPSDSocket()
+            data_stream = gps3.DataStream()
+            gps_socket.connect()
+            gps_socket.watch()
+        except Exception as e:
+            print('Failed to start GPS:', e)
+            self.running = False
+            return
+        self.running = True
+        print('GPS started')
+        while not self._stop.is_set():
+            try:
+                for new_data in gps_socket:
+                    if new_data:
+                        data_stream.unpack(new_data)
+                        if data_stream.TPV['lat'] != 'n/a' and data_stream.TPV['lon'] != 'n/a':
+                            location = {
+                                'lat': float(data_stream.TPV['lat']),
+                                'lng': float(data_stream.TPV['lon']),
+                                'timestamp': int(time.time())
+                            }
+                    time.sleep(1)
+            except Exception as e:
+                print('GPS error:', e)
+                time.sleep(1)
+        gps_socket.close()
+        self.running = False
+        print('GPS stopped')
+
+gps_mgr = GPSManager()
+
 def record_video(duration=30):
     """Record video for given duration in seconds."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -169,12 +228,22 @@ def status():
     return jsonify({
         'device_id': DEVICE_ID,
         'camera_running': camera_mgr.is_running(),
+        'gps_running': gps_mgr.is_running(),
     })
 
 
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'}), 200
+
+
+@app.route('/location', methods=['GET'])
+def get_location():
+    global location
+    if location:
+        return jsonify(location)
+    else:
+        return jsonify({'error': 'Location not available'}), 503
 
 
 @app.route('/camera/start', methods=['POST'])
@@ -321,6 +390,11 @@ if __name__ == '__main__':
     auto_start = os.getenv('AUTO_START_CAMERA', '1')
     if auto_start == '1':
         camera_mgr.start()
+
+    # Optionally start GPS automatically
+    auto_start_gps = os.getenv('AUTO_START_GPS', '1')
+    if auto_start_gps == '1':
+        gps_mgr.start()
 
     print(f'Starting Flask on 0.0.0.0:{STREAM_PORT}')
     app.run(host='0.0.0.0', port=STREAM_PORT)

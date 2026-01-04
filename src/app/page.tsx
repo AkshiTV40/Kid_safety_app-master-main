@@ -14,17 +14,14 @@ export default function Home() {
           <span className="sr-only">Guardian Keychain</span>
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6">
-          <Link href="#features" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
-            Features
+          <Link href="/location" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
+            Location
           </Link>
-          <Link href="/guardians" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
-            Guardians
+          <Link href="/videos" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
+            Videos
           </Link>
-          <Link href="/rpi-videos" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
-            RPi Videos
-          </Link>
-          <Link href="/keychain" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
-            App
+          <Link href="/sos" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
+            SOS
           </Link>
         </nav>
       </header>

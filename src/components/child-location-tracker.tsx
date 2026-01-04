@@ -21,6 +21,7 @@ export default function ChildLocationTracker({ userId = 'child-1' }: { userId?: 
     try{
       const id = navigator.geolocation.watchPosition(async (pos) => {
         const lat = pos.coords.latitude; const lng = pos.coords.longitude;
+        console.log('Child location shared:', lat, lng);
         setLast({lat,lng,timestamp: Date.now()});
         await sendLocation(userId, lat, lng);
       }, (err)=>{ console.error(err); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 });

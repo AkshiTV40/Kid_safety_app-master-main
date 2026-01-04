@@ -109,8 +109,8 @@ class CameraManager:
         global frame
         try:
             picam = self.PC2()
-            # use preview configuration for smaller latency
-            config = picam.create_preview_configuration({'main': {'size': (640, 480)}})
+            # use video configuration for 1080p
+            config = picam.create_video_configuration({'size': (1920, 1080)})
             picam.configure(config)
             picam.start()
         except Exception as e:
@@ -118,7 +118,7 @@ class CameraManager:
             self.running = False
             return
         self.running = True
-        print('Picamera2 camera started')
+        print('Picamera2 camera started at 1080p')
         while not self._stop.is_set():
             try:
                 img = picam.capture_array()
@@ -129,7 +129,7 @@ class CameraManager:
                     frame = jpeg.tobytes()
             except Exception as e:
                 print('Picamera2 capture failed', e)
-            time.sleep(0.03)
+            time.sleep(0.1)  # Reduce to ~10fps for power efficiency
         try:
             picam.stop()
         except Exception:
@@ -277,7 +277,7 @@ def generate_mjpeg():
 @app.route('/camera/stream')
 def camera_stream():
     if not camera_mgr.is_running():
-        return jsonify({'error': 'camera not running'}), 503
+        camera_mgr.start()  # Start camera on demand for streaming
     return Response(generate_mjpeg(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 

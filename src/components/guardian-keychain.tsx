@@ -222,7 +222,7 @@ export default function GuardianKeychain() {
     }
   };
 
-  // New SOS behavior: direct 911 call (via tel:) and notify guardians
+  // Debug SOS behavior: simulate call and notify guardians
   const startCall = async () => {
     // Try to send local guardian notifications like before
     setIsLoading(true);
@@ -239,13 +239,9 @@ export default function GuardianKeychain() {
       setIsLoading(false);
     }
 
-    // Trigger a 911 call — on mobile this will open the phone dialer
-    const confirmed = window.confirm('Call 911 now?');
-    if (confirmed) {
-      // Use tel: link to open the phone dialer
-      window.location.href = 'tel:911';
-      setIsCalling911(true);
-    }
+    // Debug mode: simulate SOS call
+    alert('SOS triggered in debug mode - no actual 911 call made');
+    setIsCalling911(true);
   };
 
   const endCall = () => {

@@ -14,7 +14,7 @@ export default function ChildControls(){
   const fetchRpiLocation = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://192.168.5.168:8000/location');
+      const response = await fetch('http://192.168.86.20:8000/location');
       if (response.ok) {
         const data = await response.json();
         setRpiLocation(data);

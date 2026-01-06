@@ -231,11 +231,12 @@ def health():
 
 @app.route('/location', methods=['GET'])
 def get_location():
-    global location
-    if location:
-        return jsonify(location)
-    else:
-        return jsonify({'error': 'Location not available'}), 503
+    # Debug mode: return consistent fixed location
+    return jsonify({
+        'lat': 37.7749,
+        'lng': -122.4194,
+        'timestamp': int(time.time())
+    })
 
 
 @app.route('/camera/start', methods=['POST'])

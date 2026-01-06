@@ -25,12 +25,12 @@ export default function LocationPage() {
   useEffect(() => {
     const fetchLocation = async () => {
       try {
-        const response = await fetch('http://192.168.5.168:8000/location');
+        const response = await fetch('http://192.168.86.20:8000/location');
         if (!response.ok) throw new Error('Failed to fetch location');
         const data = await response.json();
         const newLoc = {
-          lat: data.latitude,
-          lng: data.longitude,
+          lat: data.lat,
+          lng: data.lng,
           timestamp: Date.now()
         };
         setLoc(newLoc);

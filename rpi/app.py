@@ -21,6 +21,11 @@ except ImportError:
     gps3 = None
 
 try:
+    import geocoder
+except ImportError:
+    geocoder = None
+
+try:
     from gpiozero import Button
 except Exception:
     Button = None
@@ -163,17 +168,25 @@ class GPSManager:
 
     def _gps_loop(self):
         global location
-        try:
-            gps_socket = gps3.GPSDSocket()
-            data_stream = gps3.DataStream()
-            gps_socket.connect()
-            gps_socket.watch()
-        except Exception as e:
-            print('Failed to start GPS:', e)
-            self.running = False
+        while not self._stop.is_set():
+            try:
+                gps_socket = gps3.GPSDSocket()
+                data_stream = gps3.DataStream()
+                gps_socket.connect()
+                gps_socket.watch()
+                print('GPS connected and watching')
+                break
+            except Exception as e:
+                print(f'Failed to connect GPS, retrying in 5 seconds: {e}')
+                time.sleep(5)
+
+        if self._stop.is_set():
             return
+
         self.running = True
         print('GPS started')
+        consecutive_errors = 0
+
         while not self._stop.is_set():
             try:
                 for new_data in gps_socket:
@@ -183,16 +196,142 @@ class GPSManager:
                             location = {
                                 'lat': float(data_stream.TPV['lat']),
                                 'lng': float(data_stream.TPV['lon']),
-                                'timestamp': int(time.time())
+                                'timestamp': int(time.time()),
+                                'method': 'gps'
                             }
+                            consecutive_errors = 0  # Reset error counter on successful read
+                    if self._stop.is_set():
+                        break
             except Exception as e:
-                print('GPS error:', e)
+                consecutive_errors += 1
+                print(f'GPS error ({consecutive_errors}): {e}')
+                if consecutive_errors > 10:
+                    print('Too many GPS errors, restarting GPS connection')
+                    try:
+                        gps_socket.close()
+                    except:
+                        pass
+                    time.sleep(2)
+                    break  # Break to restart the connection
                 time.sleep(1)
-        gps_socket.close()
+
+        try:
+            gps_socket.close()
+        except:
+            pass
         self.running = False
         print('GPS stopped')
 
+        # Auto-restart if not manually stopped
+        if not self._stop.is_set():
+            print('GPS auto-restarting in 5 seconds')
+            time.sleep(5)
+            if not self._stop.is_set():
+                self.start()
+
 gps_mgr = GPSManager()
+
+# Geolocation manager for WiFi/IP-based location as fallback
+class GeolocationManager:
+    def __init__(self):
+        self.last_location = None
+        self.last_update = 0
+        self.update_interval = 300  # Update every 5 minutes for IP-based location
+
+    def get_location(self):
+        """Get location using multiple methods with fallbacks"""
+        current_time = time.time()
+
+        # If we have recent GPS data, use it
+        if location and (current_time - location.get('timestamp', 0)) < 60:  # GPS data fresh within 1 minute
+            return location
+
+        # Try WiFi-based geolocation if geocoder is available
+        if geocoder and (current_time - self.last_update) > self.update_interval:
+            try:
+                # Try WiFi-based location first
+                wifi_loc = geocoder.wifi()
+                if wifi_loc and wifi_loc.ok and wifi_loc.latlng:
+                    self.last_location = {
+                        'lat': wifi_loc.latlng[0],
+                        'lng': wifi_loc.latlng[1],
+                        'timestamp': int(current_time),
+                        'method': 'wifi'
+                    }
+                    self.last_update = current_time
+                    return self.last_location
+            except Exception as e:
+                print(f'WiFi geolocation failed: {e}')
+
+            try:
+                # Fallback to IP-based geolocation
+                ip_loc = geocoder.ip('me')
+                if ip_loc and ip_loc.ok and ip_loc.latlng:
+                    self.last_location = {
+                        'lat': ip_loc.latlng[0],
+                        'lng': ip_loc.latlng[1],
+                        'timestamp': int(current_time),
+                        'method': 'ip'
+                    }
+                    self.last_update = current_time
+                    return self.last_location
+            except Exception as e:
+                print(f'IP geolocation failed: {e}')
+
+        # Return cached location if available
+        if self.last_location:
+            return self.last_location
+
+        # Final fallback: return a default location (shouldn't happen in real use)
+        return {
+            'lat': 37.7749,
+            'lng': -122.4194,
+            'timestamp': int(current_time),
+            'method': 'fallback'
+        }
+
+geoloc_mgr = GeolocationManager()
+
+# Continuous location updater
+class LocationUpdater:
+    def __init__(self):
+        self.running = False
+        self._stop = threading.Event()
+        self.update_interval = 60  # Send updates every 60 seconds
+
+    def start(self):
+        if self.running:
+            return
+        self._stop.clear()
+        t = threading.Thread(target=self._update_loop, daemon=True)
+        t.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _update_loop(self):
+        self.running = True
+        print('Location updater started')
+        while not self._stop.is_set():
+            try:
+                current_loc = geoloc_mgr.get_location()
+                if SERVER_URL and current_loc:
+                    # Send location update to server
+                    data = {
+                        'device_id': DEVICE_ID,
+                        'event': 'location_update',
+                        'location': current_loc,
+                        'timestamp': current_loc['timestamp']
+                    }
+                    headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
+                    requests.post(SERVER_URL, json=data, headers=headers, timeout=10)
+            except Exception as e:
+                print(f'Location update failed: {e}')
+            time.sleep(self.update_interval)
+        self.running = False
+        print('Location updater stopped')
+
+location_updater = LocationUpdater()
 
 def record_video(duration=30, audio=False):
     """Record video for given duration in seconds, with optional audio."""
@@ -217,10 +356,13 @@ def start_recording_thread():
 
 @app.route('/status', methods=['GET'])
 def status():
+    current_loc = geoloc_mgr.get_location()
     return jsonify({
         'device_id': DEVICE_ID,
         'camera_running': camera_mgr.is_running(),
         'gps_running': gps_mgr.is_running(),
+        'location_method': current_loc.get('method', 'unknown'),
+        'last_location_update': current_loc.get('timestamp', 0),
     })
 
 
@@ -231,12 +373,9 @@ def health():
 
 @app.route('/location', methods=['GET'])
 def get_location():
-    # Debug mode: return consistent fixed location
-    return jsonify({
-        'lat': 37.7749,
-        'lng': -122.4194,
-        'timestamp': int(time.time())
-    })
+    """Return current location using GPS or geolocation fallbacks"""
+    loc = geoloc_mgr.get_location()
+    return jsonify(loc)
 
 
 @app.route('/camera/start', methods=['POST'])
@@ -377,6 +516,9 @@ if __name__ == '__main__':
     auto_start_gps = os.getenv('AUTO_START_GPS', '1')
     if auto_start_gps == '1':
         gps_mgr.start()
+
+    # Start continuous location updates
+    location_updater.start()
 
     print(f'Starting Flask on 0.0.0.0:{STREAM_PORT}')
     app.run(host='0.0.0.0', port=STREAM_PORT)

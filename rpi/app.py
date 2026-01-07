@@ -30,6 +30,13 @@ try:
 except Exception:
     Button = None
 
+try:
+    from evdev import InputDevice, categorize, ecodes
+except ImportError:
+    InputDevice = None
+    categorize = None
+    ecodes = None
+
 load_dotenv()
 
 SERVER_URL = os.getenv('SERVER_URL')
@@ -46,6 +53,9 @@ app = Flask(__name__)
 
 frame = None
 location = None
+last_help_time = 0
+HELP_COOLDOWN = 10  # seconds
+FAILED_EVENTS = []
 
 # Camera manager: supports OpenCV (USB webcams) and optional picamera2 (official Pi camera module)
 class CameraManager:
@@ -325,6 +335,19 @@ class LocationUpdater:
                     }
                     headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
                     requests.post(SERVER_URL, json=data, headers=headers, timeout=10)
+                # Retry failed events
+                global FAILED_EVENTS
+                if FAILED_EVENTS and SERVER_URL:
+                    retry_events = FAILED_EVENTS[:]
+                    FAILED_EVENTS.clear()
+                    for event in retry_events:
+                        try:
+                            headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
+                            requests.post(SERVER_URL, json=event, headers=headers, timeout=10)
+                            print('Retried failed event successfully')
+                        except Exception as e:
+                            print(f'Failed to retry event: {e}')
+                            FAILED_EVENTS.append(event)
             except Exception as e:
                 print(f'Location update failed: {e}')
             time.sleep(self.update_interval)
@@ -352,6 +375,56 @@ def record_video(duration=30, audio=False):
 def start_recording_thread():
     t = threading.Thread(target=record_video, daemon=True)
     t.start()
+
+def post_event(data):
+    """Post event with offline queue fallback"""
+    try:
+        headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
+        requests.post(SERVER_URL, json=data, headers=headers, timeout=5)
+    except Exception as e:
+        print(f'Failed to post event, queuing: {e}')
+        FAILED_EVENTS.append(data)
+
+def trigger_help():
+    """Unified help trigger with debounce and offline safety"""
+    global last_help_time
+    now = time.time()
+    if now - last_help_time < HELP_COOLDOWN:
+        print('Help press ignored (cooldown)')
+        return
+    last_help_time = now
+
+    print('HELP triggered')
+
+    # Start camera if not running
+    if not camera_mgr.is_running():
+        camera_mgr.start()
+
+    # Start GPS if not running
+    if not gps_mgr.is_running():
+        gps_mgr.start()
+
+    # Start recording
+    start_recording_thread()
+
+    # Local API event
+    try:
+        requests.post(f'http://localhost:{STREAM_PORT}/help', timeout=2)
+    except Exception:
+        pass
+
+    # Remote event
+    data = {
+        'device_id': DEVICE_ID,
+        'event': 'help_pressed',
+        'location': geoloc_mgr.get_location(),
+        'timestamp': int(now)
+    }
+
+    if SERVER_URL:
+        post_event(data)
+    else:
+        print('No SERVER_URL configured, skipping POST', data)
 
 
 @app.route('/status', methods=['GET'])
@@ -453,6 +526,36 @@ def get_video(filename):
     return send_from_directory(VIDEOS_DIR, filename)
 
 
+def usb_key_worker():
+    """Listen for USB keyboard emergency key presses"""
+    if InputDevice is None:
+        print('evdev not available, skipping USB key monitoring')
+        return
+
+    TARGET_KEY = ecodes.KEY_F13  # Match what you programmed on the USB key
+
+    devices = [InputDevice(path) for path in InputDevice.list_devices()]
+    keyboard = None
+
+    for dev in devices:
+        if 'Keyboard' in dev.name or 'HID' in dev.name:
+            keyboard = dev
+            break
+
+    if not keyboard:
+        print('No USB keyboard device found')
+        return
+
+    print(f'Listening for USB key on {keyboard.path}')
+
+    for event in keyboard.read_loop():
+        if event.type == ecodes.EV_KEY:
+            key = categorize(event)
+            if key.keystate == key.key_down and key.scancode == TARGET_KEY:
+                print('USB emergency key pressed')
+                trigger_help()
+
+
 def button_worker():
     # Allow disabling button monitoring on non-Pi/dev systems
     if os.getenv('DISABLE_BUTTONS', '0') == '1':
@@ -464,23 +567,7 @@ def button_worker():
         return
 
     def on_help():
-        print('Help button pressed')
-        # start recording video
-        start_recording_thread()
-        # send local event
-        try:
-            requests.post(f'http://localhost:{STREAM_PORT}/help', timeout=2)
-        except Exception:
-            pass
-
-        # send remote event
-        data = {'device_id': DEVICE_ID, 'event': 'help_pressed', 'timestamp': int(time.time())}
-        headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
-        if SERVER_URL:
-            try:
-                requests.post(SERVER_URL, json=data, headers=headers, timeout=5)
-            except Exception as e:
-                print('Failed to post to SERVER_URL', e)
+        trigger_help()
 
     def on_power():
         print('Open app button pressed - starting camera and GPS')
@@ -506,6 +593,10 @@ if __name__ == '__main__':
     # Start button worker in background
     t = threading.Thread(target=button_worker, daemon=True)
     t.start()
+
+    # Start USB key worker in background
+    t_usb = threading.Thread(target=usb_key_worker, daemon=True)
+    t_usb.start()
 
     # Optionally start camera automatically
     auto_start = os.getenv('AUTO_START_CAMERA', '1')

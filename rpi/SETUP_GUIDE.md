@@ -147,6 +147,12 @@ AUTO_START_GPS=1     # Start GPS on boot (if available)
 
 # Optional: Disable button monitoring for testing
 DISABLE_BUTTONS=0
+
+# Optional: Fixed location coordinates for this device (latitude, longitude)
+# If set, these will be used instead of GPS/geolocation for consistent location
+# Useful for indoor testing or when GPS is not available
+# DEVICE_LAT=37.7749
+# DEVICE_LNG=-122.4194
 ```
 
 ### GPIO Pin Configuration

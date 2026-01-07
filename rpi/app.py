@@ -46,6 +46,9 @@ HELP_PIN = int(os.getenv('HELP_BUTTON_PIN', '17'))
 POWER_PIN = int(os.getenv('POWER_BUTTON_PIN', '27'))
 CAM_INDEX = int(os.getenv('CAMERA_INDEX', '0'))
 STREAM_PORT = int(os.getenv('STREAM_PORT', '8000'))
+# Fixed location for RPi if GPS not available
+DEVICE_LAT = os.getenv('DEVICE_LAT')
+DEVICE_LNG = os.getenv('DEVICE_LNG')
 VIDEOS_DIR = 'videos'
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
@@ -251,6 +254,20 @@ class GeolocationManager:
     def get_location(self):
         """Get location using multiple methods with fallbacks"""
         current_time = time.time()
+
+        # Check for fixed device location first (for RPi with known coordinates)
+        if DEVICE_LAT and DEVICE_LNG:
+            try:
+                lat = float(DEVICE_LAT)
+                lng = float(DEVICE_LNG)
+                return {
+                    'lat': lat,
+                    'lng': lng,
+                    'timestamp': int(current_time),
+                    'method': 'device_config'
+                }
+            except ValueError:
+                print('Invalid DEVICE_LAT/DEVICE_LNG values')
 
         # If we have recent GPS data, use it
         if location and (current_time - location.get('timestamp', 0)) < 60:  # GPS data fresh within 1 minute

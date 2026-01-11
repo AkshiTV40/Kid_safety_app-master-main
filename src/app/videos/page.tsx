@@ -68,13 +68,13 @@ export default function VideosPage() {
     const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
     setIsRecording(true);
     try {
-      const res = await fetch(`${RPI_URL}/help`, { method: 'POST' });
+      const res = await fetch(`${RPI_URL}/record`, { method: 'POST' });
       if (!res.ok) throw new Error("Failed to start recording");
-      alert("Recording started. It will record for 30 seconds.");
+      alert("Recording started. It will record for 10 seconds.");
       setTimeout(() => {
         load();
         setIsRecording(false);
-      }, 35000);
+      }, 15000);
     } catch (e) {
       console.error("Failed to start recording", e);
       alert("Failed to start recording.");

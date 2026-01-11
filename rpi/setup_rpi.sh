@@ -96,6 +96,11 @@ else
   echo "$ENV_FILE already exists; leaving it alone"
 fi
 
+# Create videos directory
+echo "Creating videos directory at /home/pi/raspi-backend/videos"
+mkdir -p /home/pi/raspi-backend/videos
+chown "$SERVICE_USER:$SERVICE_USER" /home/pi/raspi-backend/videos
+
 # Create systemd service file
 echo "Writing systemd unit to $SERVICE_FILE_PATH"
 cat > "$SERVICE_FILE_PATH" <<EOF

@@ -2,6 +2,8 @@
 import os
 import time
 import threading
+import subprocess
+import json
 from datetime import datetime
 from flask import Flask, Response, jsonify, send_from_directory
 from flask_cors import CORS
@@ -18,9 +20,10 @@ DEVICE_ID = os.getenv("DEVICE_ID", "raspi")
 HELP_PIN = int(os.getenv("HELP_BUTTON_PIN", "17"))
 PORT = int(os.getenv("STREAM_PORT", "8000"))
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
+VIDEOS_DIR = "/home/pi/raspi-backend/videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+CACHE_FILE = "/home/pi/raspi-backend/location_cache.json"
 
 # ---------------- APP ---------------- #
 
@@ -60,24 +63,65 @@ def record_video(duration=10):
 
 # ---------------- LOCATION ---------------- #
 
-def get_location():
+def get_wifi_ssid():
     try:
-        g = geocoder.ip("me")
-        if g.ok:
-            return {
-                "lat": g.latlng[0],
-                "lng": g.latlng[1],
-                "timestamp": int(time.time()),
-                "method": "ip"
-            }
+        result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True)
+        for line in result.stdout.split('\n'):
+            if 'ESSID:' in line:
+                ssid = line.split('ESSID:')[1].strip().strip('"')
+                return ssid
+    except:
+        pass
+    return "unknown"
+
+def load_cached_location():
+    try:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except:
+        pass
+    return None
+
+def save_cached_location(loc):
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(loc, f)
     except:
         pass
 
+def get_location():
+    wifi_ssid = get_wifi_ssid()
+
+    # Try online location
+    try:
+        g = geocoder.ip("me")
+        if g.ok:
+            loc = {
+                "lat": g.latlng[0],
+                "lng": g.latlng[1],
+                "timestamp": int(time.time()),
+                "method": "ip",
+                "wifi_ssid": wifi_ssid
+            }
+            save_cached_location(loc)
+            return loc
+    except:
+        pass
+
+    # Fallback to cached location
+    cached = load_cached_location()
+    if cached:
+        cached["wifi_ssid"] = wifi_ssid
+        return cached
+
+    # Ultimate fallback
     return {
         "lat": 0.0,
         "lng": 0.0,
         "timestamp": int(time.time()),
-        "method": "fallback"
+        "method": "fallback",
+        "wifi_ssid": wifi_ssid
     }
 
 # ---------------- BUTTON ---------------- #
@@ -106,7 +150,8 @@ def location():
         "latitude": loc["lat"],
         "longitude": loc["lng"],
         "timestamp": loc["timestamp"],
-        "method": loc["method"]
+        "method": loc["method"],
+        "wifi_ssid": loc.get("wifi_ssid", "unknown")
     })
 
 @app.route("/videos")

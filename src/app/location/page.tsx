@@ -25,23 +25,52 @@ export default function LocationPage() {
   useEffect(() => {
     const fetchLocation = async () => {
       try {
+        // Try RPi first
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
         const response = await fetch(`${RPI_URL}/location`);
-        if (!response.ok) throw new Error('Failed to fetch location');
-        const data = await response.json();
-        const newLoc = {
-          lat: data.latitude,
-          lng: data.longitude,
-          timestamp: Date.now()
-        };
-        setLoc(newLoc);
-        setError(null);
+        if (response.ok) {
+          const data = await response.json();
+          const newLoc = {
+            lat: data.latitude,
+            lng: data.longitude,
+            timestamp: Date.now()
+          };
+          setLoc(newLoc);
+          setError(null);
 
-        // Fetch address
-        const result = await reverseGeocode(newLoc.lat, newLoc.lng);
-        setAddress(result ? formatAddress(result) : 'Address not found');
+          // Fetch address
+          const result = await reverseGeocode(newLoc.lat, newLoc.lng);
+          setAddress(result ? formatAddress(result) : 'Address not found');
+          return;
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error');
+        console.log('RPi not available, falling back to browser geolocation');
+      }
+
+      // Fallback to browser geolocation
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            const newLoc = {
+              lat,
+              lng,
+              timestamp: Date.now()
+            };
+            setLoc(newLoc);
+            setError(null);
+
+            // Fetch address
+            const result = await reverseGeocode(newLoc.lat, newLoc.lng);
+            setAddress(result ? formatAddress(result) : 'Address not found');
+          },
+          (error) => {
+            setError('Location access denied. Please enable GPS permissions.');
+          }
+        );
+      } else {
+        setError('Geolocation is not supported by this browser.');
       }
     };
 

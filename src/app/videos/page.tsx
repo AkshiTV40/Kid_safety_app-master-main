@@ -11,39 +11,82 @@ type Video = {
   filename: string;
   size: number;
   timestamp: number;
+  isLocal?: boolean;
+  id?: string;
 };
 
-function VideoThumbnail({ filename }: { filename: string }) {
+function VideoThumbnail({ filename, isLocal, blob }: { filename: string; isLocal?: boolean; blob?: Blob }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
-    const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-    const url = `${RPI_URL}/videos/${encodeURIComponent(filename)}`;
-    fetch(url)
-      .then((res) => res.blob())
-      .then((blob) => {
-        const videoUrl = URL.createObjectURL(blob);
-        const v = document.createElement('video');
-        v.src = videoUrl;
-        v.muted = true;
-        v.playsInline = true;
-        v.currentTime = 0.5;
-        v.addEventListener('loadeddata', () => {
-          const c = document.createElement('canvas');
-          c.width = 120;
-          c.height = 80;
-          const ctx = c.getContext('2d');
-          if (ctx) ctx.drawImage(v, 0, 0, c.width, c.height);
-          const data = c.toDataURL('image/jpeg', 0.6);
-          setSrc(data);
-          URL.revokeObjectURL(videoUrl);
-        });
-        v.addEventListener('error', () => URL.revokeObjectURL(videoUrl));
+    const loadVideo = async () => {
+      let videoBlob: Blob;
+      if (isLocal && blob) {
+        videoBlob = blob;
+      } else {
+        const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+        const url = `${RPI_URL}/videos/${encodeURIComponent(filename)}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        videoBlob = await res.blob();
+      }
+
+      const videoUrl = URL.createObjectURL(videoBlob);
+      const v = document.createElement('video');
+      v.src = videoUrl;
+      v.muted = true;
+      v.playsInline = true;
+      v.currentTime = 0.5;
+      v.addEventListener('loadeddata', () => {
+        const c = document.createElement('canvas');
+        c.width = 120;
+        c.height = 80;
+        const ctx = c.getContext('2d');
+        if (ctx) ctx.drawImage(v, 0, 0, c.width, c.height);
+        const data = c.toDataURL('image/jpeg', 0.6);
+        setSrc(data);
+        URL.revokeObjectURL(videoUrl);
       });
-  }, [filename]);
+      v.addEventListener('error', () => URL.revokeObjectURL(videoUrl));
+    };
+
+    loadVideo();
+  }, [filename, isLocal, blob]);
 
   if (!src) return <div className="w-30 h-20 bg-muted rounded" />;
   return <img src={src} className="w-30 h-20 object-cover rounded" alt="thumbnail" />;
+}
+
+function VideoPlayer({ filename, videos }: { filename: string; videos: Video[] }) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadVideo = async () => {
+      const video = videos.find(v => v.filename === filename);
+      if (!video) return;
+
+      if (video.isLocal && video.id) {
+        const { getRecording } = await import('@/lib/recordings');
+        const blob = await getRecording(video.id);
+        if (blob) {
+          setSrc(URL.createObjectURL(blob));
+        }
+      } else {
+        const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+        setSrc(`${RPI_URL}/videos/${encodeURIComponent(filename)}`);
+      }
+    };
+
+    loadVideo();
+  }, [filename, videos]);
+
+  if (!src) return <div>Loading...</div>;
+
+  return (
+    <video controls className="w-full" src={src}>
+      Your browser does not support the video tag.
+    </video>
+  );
 }
 
 export default function VideosPage() {
@@ -53,31 +96,98 @@ export default function VideosPage() {
   const isMobile = useIsMobile();
 
   const load = async () => {
+    const allVideos: Video[] = [];
+
+    // Load RPi videos
     const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
     try {
       const res = await fetch(`${RPI_URL}/videos`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      setVideos(data);
+      if (res.ok) {
+        const data = await res.json();
+        allVideos.push(...data.map((filename: string) => ({
+          filename,
+          size: 0, // RPi doesn't provide size in simple list
+          timestamp: 0, // Would need to fetch individually
+          isLocal: false
+        })));
+      }
     } catch (e) {
-      console.error("Failed to load videos", e);
+      console.error("Failed to load RPi videos", e);
     }
+
+    // Load local recordings
+    try {
+      const { listRecordings } = await import('@/lib/recordings');
+      const localRecs = await listRecordings();
+      allVideos.push(...localRecs.map(rec => ({
+        filename: `local_${rec.id}.webm`,
+        size: rec.size,
+        timestamp: rec.timestamp,
+        isLocal: true,
+        id: rec.id
+      })));
+    } catch (e) {
+      console.error("Failed to load local recordings", e);
+    }
+
+    // Sort by timestamp descending
+    allVideos.sort((a, b) => b.timestamp - a.timestamp);
+    setVideos(allVideos);
   };
 
   const recordVideo = async () => {
     const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
     setIsRecording(true);
     try {
+      // Try RPi first
       const res = await fetch(`${RPI_URL}/record`, { method: 'POST' });
-      if (!res.ok) throw new Error("Failed to start recording");
-      alert("Recording started. It will record for 10 seconds.");
-      setTimeout(() => {
-        load();
-        setIsRecording(false);
-      }, 15000);
+      if (res.ok) {
+        alert("Recording started on RPi. It will record for 10 seconds.");
+        setTimeout(() => {
+          load();
+          setIsRecording(false);
+        }, 15000);
+        return;
+      }
     } catch (e) {
-      console.error("Failed to start recording", e);
-      alert("Failed to start recording.");
+      console.log('RPi not available, falling back to local recording');
+    }
+
+    // Fallback to local recording
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const { saveRecording } = await import('@/lib/recordings');
+        try {
+          await saveRecording(blob);
+          alert("Recording saved locally.");
+          load(); // Refresh local recordings
+        } catch (e) {
+          console.error('Failed to save recording', e);
+          alert("Failed to save recording.");
+        }
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecording(false);
+      };
+
+      recorder.start();
+      alert("Recording started locally for 10 seconds.");
+      setTimeout(() => {
+        recorder.stop();
+      }, 10000);
+    } catch (e) {
+      console.error("Failed to start local recording", e);
+      alert("Failed to start recording. Please check camera permissions.");
       setIsRecording(false);
     }
   };
@@ -128,11 +238,11 @@ export default function VideosPage() {
             <div className={`grid gap-4 ${isMobile ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-3'}`}>
               {videos.map((v) => (
                 <div key={v.filename} className="p-4 border rounded-md bg-card">
-                  <VideoThumbnail filename={v.filename} />
+                  <VideoThumbnail filename={v.filename} isLocal={v.isLocal} />
                   <div className="mt-2">
-                    <div className="font-medium">{v.filename}</div>
+                    <div className="font-medium">{v.filename} {v.isLocal && <span className="text-xs text-muted">(Local)</span>}</div>
                     <div className="text-sm text-muted-foreground">
-                      {new Date(v.timestamp * 1000).toLocaleString()} • {(v.size / 1024 / 1024).toFixed(2)} MB
+                      {new Date(v.timestamp).toLocaleString()} • {(v.size / 1024 / 1024).toFixed(2)} MB
                     </div>
                   </div>
                   <div className="flex gap-2 mt-2">
@@ -141,9 +251,18 @@ export default function VideosPage() {
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => {
-                        const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-                        window.open(`${RPI_URL}/videos/${encodeURIComponent(v.filename)}`, "_blank");
+                      onClick={async () => {
+                        if (v.isLocal && v.id) {
+                          const { getRecording } = await import('@/lib/recordings');
+                          const blob = await getRecording(v.id);
+                          if (blob) {
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, "_blank");
+                          }
+                        } else {
+                          const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+                          window.open(`${RPI_URL}/videos/${encodeURIComponent(v.filename)}`, "_blank");
+                        }
                       }}
                     >
                       Download
@@ -163,13 +282,7 @@ export default function VideosPage() {
             <DialogTitle>Playing: {playingVideo}</DialogTitle>
           </DialogHeader>
           {playingVideo && (
-            <video
-              controls
-              className="w-full"
-              src={`${process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000"}/videos/${encodeURIComponent(playingVideo)}`}
-            >
-              Your browser does not support the video tag.
-            </video>
+            <VideoPlayer filename={playingVideo} videos={videos} />
           )}
         </DialogContent>
       </Dialog>

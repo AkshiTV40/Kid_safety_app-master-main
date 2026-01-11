@@ -1,5 +1,5 @@
 [Unit]
-Description=Child Safety Camera Service
+Description=Guardian Keychain Raspberry Pi Service
 After=network.target
 
 [Service]
@@ -9,7 +9,7 @@ WorkingDirectory=/home/pi/guardian-keychain/rpi
 EnvironmentFile=/home/pi/guardian-keychain/rpi/.env
 ExecStart=/home/pi/guardian-keychain/rpi/.venv/bin/python /home/pi/guardian-keychain/rpi/app.py
 Restart=always
-RestartSec=3
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 

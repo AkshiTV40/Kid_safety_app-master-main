@@ -1,6 +1,7 @@
-import fs from 'fs';
-import path from 'path';
+import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
+import ffmpeg from 'fluent-ffmpeg';
+import { PassThrough } from 'stream';
 
 export const runtime = 'nodejs';
 
@@ -12,15 +13,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No file' }, { status: 400 });
     }
 
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    await fs.promises.mkdir(uploadsDir, { recursive: true });
+    if (!file.type.startsWith('video/')) {
+      return NextResponse.json({ error: 'File must be a video' }, { status: 400 });
+    }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const filename = `recording-${Date.now()}.webm`;
-    const dest = path.join(uploadsDir, filename);
-    await fs.promises.writeFile(dest, buffer);
+    // Convert to MP4
+    const buffer = await file.arrayBuffer();
+    const inputStream = new PassThrough();
+    inputStream.end(Buffer.from(buffer));
 
-    return NextResponse.json({ success: true, filename });
+    const outputBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      ffmpeg(inputStream)
+        .inputFormat(file.type.split('/')[1]) // e.g., 'webm'
+        .toFormat('mp4')
+        .videoCodec('libx264')
+        .audioCodec('aac')
+        .on('error', (err) => reject(err))
+        .pipe(new PassThrough())
+        .on('data', (chunk) => chunks.push(chunk))
+        .on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    const filename = `recording-${Date.now()}.mp4`;
+    const blob = await put(filename, outputBuffer, { access: 'public' });
+
+    return NextResponse.json({ success: true, url: blob.url });
   } catch (e: any) {
     console.error('Upload failed', e);
     return NextResponse.json({ error: e?.message || 'Upload failed' }, { status: 500 });

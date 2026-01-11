@@ -110,6 +110,8 @@ EnvironmentFile=$PROJECT_DIR/rpi/.env
 ExecStart=$VENV_DIR/bin/python $PROJECT_DIR/rpi/app.py
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

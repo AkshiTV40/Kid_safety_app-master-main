@@ -9,7 +9,9 @@ This is an example. Adjust pins, security, and camera code for your hardware.
 
 import os
 import time
+import math
 import threading
+import numpy as np
 from datetime import datetime
 from flask import Flask, Response, jsonify, request, send_from_directory
 import requests
@@ -37,25 +39,49 @@ except ImportError:
     categorize = None
     ecodes = None
 
+try:
+    import smbus
+except ImportError:
+    smbus = None
+
+try:
+    from pyngrok import ngrok
+except ImportError:
+    ngrok = None
+
 load_dotenv()
 
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
 SERVER_URL = os.getenv('SERVER_URL')
+UPLOAD_URL = os.getenv('UPLOAD_URL', SERVER_URL + '/api/recordings/upload' if SERVER_URL else None)
 DEVICE_ID = os.getenv('DEVICE_ID', 'raspi')
 API_KEY = os.getenv('API_KEY', '')
 HELP_PIN = int(os.getenv('HELP_BUTTON_PIN', '17'))
 POWER_PIN = int(os.getenv('POWER_BUTTON_PIN', '27'))
 CAM_INDEX = int(os.getenv('CAMERA_INDEX', '0'))
 STREAM_PORT = int(os.getenv('STREAM_PORT', '8000'))
+NGROK_AUTH_TOKEN = os.getenv('NGROK_AUTH_TOKEN')
 # Fixed location for RPi if GPS not available
 DEVICE_LAT = os.getenv('DEVICE_LAT')
 DEVICE_LNG = os.getenv('DEVICE_LNG')
 VIDEOS_DIR = 'videos'
 os.makedirs(VIDEOS_DIR, exist_ok=True)
+SPEED_THRESHOLD = 10  # km/h
+MOTION_THRESHOLD = float(os.getenv('MOTION_THRESHOLD', '5000'))
+MOTION_COOLDOWN = int(os.getenv('MOTION_COOLDOWN', '30'))
 
 app = Flask(__name__)
 
 frame = None
 location = None
+tunnel_url = None
 last_help_time = 0
 HELP_COOLDOWN = 10  # seconds
 FAILED_EVENTS = []
@@ -165,6 +191,9 @@ class GPSManager:
         self.lock = threading.Lock()
         self.running = False
         self._stop = threading.Event()
+        self.previous_lat = None
+        self.previous_lng = None
+        self.previous_time = None
 
     def start(self):
         if self.running or gps3 is None:
@@ -213,6 +242,20 @@ class GPSManager:
                                 'method': 'gps'
                             }
                             consecutive_errors = 0  # Reset error counter on successful read
+                            # Speed detection
+                            if self.previous_lat is not None:
+                                distance = haversine(self.previous_lat, self.previous_lng, location['lat'], location['lng'])
+                                time_delta = location['timestamp'] - self.previous_time
+                                if time_delta > 0:
+                                    speed = (distance / time_delta) * 3600  # km/h
+                                    print(f'Calculated speed: {speed:.2f} km/h')
+                                    if speed > SPEED_THRESHOLD:
+                                        print('Speed threshold exceeded, triggering recording')
+                                        start_recording_thread()
+                            # Update previous location
+                            self.previous_lat = location['lat']
+                            self.previous_lng = location['lng']
+                            self.previous_time = location['timestamp']
                     if self._stop.is_set():
                         break
             except Exception as e:
@@ -243,6 +286,58 @@ class GPSManager:
                 self.start()
 
 gps_mgr = GPSManager()
+
+# Motion detector using OpenCV background subtraction
+class MotionDetector:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.running = False
+        self._stop = threading.Event()
+        self.last_motion_time = 0
+        self.fgbg = cv2.createBackgroundSubtractorMOG2()
+
+    def start(self):
+        if self.running:
+            return
+        self._stop.clear()
+        t = threading.Thread(target=self._motion_loop, daemon=True)
+        t.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def is_running(self):
+        return self.running
+
+    def _motion_loop(self):
+        global frame
+        self.running = True
+        print('Motion detector started')
+        while not self._stop.is_set():
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            # Decode the JPEG frame
+            nparr = np.frombuffer(frame, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                time.sleep(0.1)
+                continue
+            # Apply background subtraction
+            fgmask = self.fgbg.apply(img)
+            # Calculate motion as count of non-zero pixels
+            motion = cv2.countNonZero(fgmask)
+            if motion > MOTION_THRESHOLD:
+                now = time.time()
+                if now - self.last_motion_time > MOTION_COOLDOWN:
+                    print(f'Motion detected: {motion}, triggering recording')
+                    start_recording_thread()
+                    self.last_motion_time = now
+            time.sleep(0.1)  # Process at ~10fps
+        self.running = False
+        print('Motion detector stopped')
+
+motion_mgr = MotionDetector()
 
 # Geolocation manager for WiFi/IP-based location as fallback
 class GeolocationManager:
@@ -386,6 +481,22 @@ def record_video(duration=30, audio=False):
             cmd.extend(['--codec', 'h264'])
         subprocess.run(cmd, check=True)
         print(f'Video recorded: {filename}')
+
+        # Upload to cloud
+        if UPLOAD_URL and os.path.exists(filename):
+            try:
+                with open(filename, 'rb') as f:
+                    files = {'file': f}
+                    headers = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
+                    response = requests.post(UPLOAD_URL, files=files, headers=headers, timeout=30)
+                    if response.status_code == 200:
+                        print(f'Video uploaded successfully: {response.json().get("url")}')
+                        # Delete local file after successful upload
+                        os.remove(filename)
+                    else:
+                        print(f'Failed to upload video: {response.status_code} {response.text}')
+            except Exception as e:
+                print(f'Failed to upload video: {e}')
     except Exception as e:
         print(f'Failed to record video: {e}')
 
@@ -451,8 +562,10 @@ def status():
         'device_id': DEVICE_ID,
         'camera_running': camera_mgr.is_running(),
         'gps_running': gps_mgr.is_running(),
+        'motion_running': motion_mgr.is_running(),
         'location_method': current_loc.get('method', 'unknown'),
         'last_location_update': current_loc.get('timestamp', 0),
+        'tunnel_url': tunnel_url,
     })
 
 
@@ -607,6 +720,20 @@ def button_worker():
 
 
 if __name__ == '__main__':
+    # Set up ngrok tunnel if available
+    if ngrok and NGROK_AUTH_TOKEN:
+        try:
+            ngrok.set_auth_token(NGROK_AUTH_TOKEN)
+            tunnel = ngrok.connect(STREAM_PORT, "http")
+            tunnel_url = tunnel.public_url
+            print(f'Ngrok tunnel established: {tunnel_url}')
+        except Exception as e:
+            print(f'Failed to establish ngrok tunnel: {e}')
+    elif ngrok and not NGROK_AUTH_TOKEN:
+        print('NGROK_AUTH_TOKEN not set, skipping tunnel setup')
+    else:
+        print('pyngrok not available, skipping tunnel setup')
+
     # Start button worker in background
     t = threading.Thread(target=button_worker, daemon=True)
     t.start()
@@ -624,6 +751,11 @@ if __name__ == '__main__':
     auto_start_gps = os.getenv('AUTO_START_GPS', '1')
     if auto_start_gps == '1':
         gps_mgr.start()
+
+    # Optionally start motion detector automatically
+    auto_start_motion = os.getenv('AUTO_START_MOTION', '0')
+    if auto_start_motion == '1':
+        motion_mgr.start()
 
     # Start continuous location updates
     location_updater.start()

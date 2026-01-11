@@ -21,8 +21,13 @@ geocoder
 
 # USB keyboard input support
 evdev
+# I2C support for accelerometer/IMU sensors
+smbus2
 
 # Picamera2 is optional and Raspberry Pi–specific. It is typically installed via apt on Raspberry Pi OS:
 #   sudo apt update && sudo apt install -y python3-picamera2 libcamera-apps
 # If a pip wheel is available you can try 'pip install picamera2', but apt is the recommended path on Pi.
 # (This package is not required for USB webcams or OpenCV capture.)
+
+# Ngrok for secure remote tunneling
+pyngrok

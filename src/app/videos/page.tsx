@@ -74,7 +74,11 @@ function VideoPlayer({ filename, videos }: { filename: string; videos: Video[] }
         }
       } else {
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-        setSrc(`${RPI_URL}/videos/${encodeURIComponent(filename)}`);
+        if (video.url) {
+          setSrc(`${RPI_URL}${video.url}`);
+        } else {
+          setSrc(`${RPI_URL}/videos/${encodeURIComponent(filename)}`);
+        }
       }
     };
 
@@ -286,8 +290,18 @@ export default function VideosPage() {
         </div>
       )}
 
+      {/* Live Stream */}
+      {rpiConnected && (
+        <div className="pt-20 p-4 bg-secondary">
+          <div className="max-w-6xl mx-auto">
+            <h2 className="text-xl font-bold mb-2">Live Stream from RPi</h2>
+            <img src={`${process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000"}/camera/stream`} alt="Live Stream" className="w-full max-w-md border rounded" />
+          </div>
+        </div>
+      )}
+
       {/* Video List */}
-      <div className="pt-20 p-4">
+      <div className="p-4">
         <div className="max-w-6xl mx-auto">
           {videos.length === 0 ? (
             <p className="text-muted-foreground">No videos yet.</p>
@@ -316,11 +330,9 @@ export default function VideosPage() {
                             const url = URL.createObjectURL(blob);
                             window.open(url, "_blank");
                           }
-                        } else if (v.url) {
-                          window.open(v.url, "_blank");
                         } else {
                           const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-                          window.open(`${RPI_URL}/videos/${encodeURIComponent(v.filename)}`, "_blank");
+                          window.open(`${RPI_URL}${v.url}`, "_blank");
                         }
                       }}
                     >

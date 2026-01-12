@@ -1,11 +1,32 @@
+"use client";
+
 import Link from 'next/link';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Logo } from '@/components/logo';
 import { Smartphone, ShieldCheck, Zap, Users } from 'lucide-react';
 import Image from 'next/image';
 
 export default function Home() {
+  const [rpiStatus, setRpiStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+
+  useEffect(() => {
+    const check = async () => {
+      const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+      try {
+        const res = await fetch(`${RPI_URL}/health`);
+        setRpiStatus(res.ok ? 'connected' : 'disconnected');
+      } catch {
+        setRpiStatus('disconnected');
+      }
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
       <header className="px-4 lg:px-6 h-14 flex items-center">
@@ -14,6 +35,7 @@ export default function Home() {
           <span className="sr-only">Guardian Keychain</span>
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6">
+          <Badge variant={rpiStatus === 'connected' ? 'default' : 'destructive'}>RPi: {rpiStatus}</Badge>
           <Link href="/location" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
             Location
           </Link>

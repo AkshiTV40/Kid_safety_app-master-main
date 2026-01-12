@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type Video = {
   filename: string;
@@ -230,13 +231,16 @@ export default function VideosPage() {
     load();
 
     // Subscribe to real-time video updates
-    const videosSubscription = supabase
-      .channel('videos')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, (payload) => {
-        console.log('Video change:', payload);
-        load(); // Reload videos on any change
-      })
-      .subscribe();
+    let videosSubscription: RealtimeChannel | null = null;
+    if (supabase) {
+      videosSubscription = supabase
+        .channel('videos')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, (payload) => {
+          console.log('Video change:', payload);
+          load(); // Reload videos on any change
+        })
+        .subscribe();
+    }
 
     // Poll for recording status if RPi connected (since status not in DB)
     const interval = setInterval(async () => {
@@ -255,7 +259,9 @@ export default function VideosPage() {
     }, 5000);
 
     return () => {
-      videosSubscription.unsubscribe();
+      if (videosSubscription) {
+        videosSubscription.unsubscribe();
+      }
       clearInterval(interval);
     };
   }, [rpiConnected]);

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
+export const dynamic = 'force-dynamic';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";

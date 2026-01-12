@@ -1,4 +1,3 @@
-import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import ffmpeg from 'fluent-ffmpeg';
@@ -37,15 +36,29 @@ export async function POST(req: Request) {
     });
 
     const filename = `recording-${Date.now()}.mp4`;
-    const blob = await put(filename, outputBuffer, { access: 'public' });
+
+    // Upload to Supabase Storage
+    const supabase = createClient();
+    const { data, error: uploadError } = await supabase.storage
+      .from('videos')
+      .upload(filename, outputBuffer, {
+        contentType: 'video/mp4',
+        upsert: false
+      });
+
+    if (uploadError) throw uploadError;
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('videos')
+      .getPublicUrl(filename);
 
     // Store metadata in Supabase
-    const supabase = createClient();
     const { error } = await supabase
       .from('videos')
       .insert({
         filename,
-        url: blob.url,
+        url: urlData.publicUrl,
         timestamp: Date.now(),
         size: outputBuffer.length,
         device_id: 'rpi'
@@ -53,7 +66,7 @@ export async function POST(req: Request) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true, url: blob.url });
+    return NextResponse.json({ success: true, url: urlData.publicUrl });
   } catch (e: any) {
     console.error('Upload failed', e);
     return NextResponse.json({ error: e?.message || 'Upload failed' }, { status: 500 });

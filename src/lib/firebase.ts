@@ -33,3 +33,22 @@ export function requestHelp(userId: string, data: { message?: string }) {
   const requestsRef = ref(db, `help_requests/${userId}`);
   return push(requestsRef, { ...data, timestamp: Date.now() });
 }
+
+export function listenToRecordingStatus(deviceId: string, cb: (data: {recording: boolean} | null) => void) {
+  const statusRef = ref(db, `status/${deviceId}`);
+  return onValue(statusRef, snapshot => {
+    const val = snapshot.val();
+    if (!val) return cb(null);
+    cb({ recording: val.recording });
+  });
+}
+
+export function listenToVideos(cb: (videos: Array<{id: string, filename: string, url: string, timestamp: number, size: number, device_id: string}>) => void) {
+  const videosRef = ref(db, 'videos');
+  return onValue(videosRef, snapshot => {
+    const val = snapshot.val();
+    if (!val) return cb([]);
+    const videos = Object.keys(val).map(key => ({ id: key, ...val[key] }));
+    cb(videos);
+  });
+}

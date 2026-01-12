@@ -10,6 +10,7 @@ from picamzero import Camera
 from gpiozero import Button
 import geocoder
 from dotenv import load_dotenv
+import requests
 
 # Check if running on Raspberry Pi
 if platform.machine() not in ['armv7l', 'aarch64']:
@@ -27,6 +28,8 @@ PORT = int(os.getenv("STREAM_PORT", "8000"))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+UPLOAD_URL = os.getenv("UPLOAD_URL", "https://your-vercel-app.vercel.app/api/recordings/upload")
 
 # ---------------- APP ---------------- #
 
@@ -70,9 +73,21 @@ def record_video(duration=10):
         while is_recording and (time.time() - start_time) < duration:
             time.sleep(0.1)
         camera.stop_recording()
-        print("✅ Saved:", filepath)
+        print("✅ Saved locally:", filepath)
+
+        # Upload to Vercel API
+        with open(filepath, 'rb') as f:
+            files = {'file': (filename, f, 'video/mp4')}
+            response = requests.post(UPLOAD_URL, files=files)
+            if response.status_code == 200:
+                data = response.json()
+                video_url = data['url']
+                print("✅ Uploaded to Vercel:", video_url)
+            else:
+                print("❌ Upload failed:", response.text)
+
     except Exception as e:
-        print("❌ Camera error:", e)
+        print("❌ Error:", e)
     finally:
         is_recording = False
 

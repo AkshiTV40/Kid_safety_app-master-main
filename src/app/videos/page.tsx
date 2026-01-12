@@ -16,23 +16,21 @@ type Video = {
   url?: string;
 };
 
-function VideoThumbnail({ filename, isLocal, blob }: { filename: string; isLocal?: boolean; blob?: Blob }) {
+function VideoThumbnail({ filename, isLocal, blob, url }: { filename: string; isLocal?: boolean; blob?: Blob; url?: string }) {
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     const loadVideo = async () => {
-      let videoBlob: Blob;
+      let videoUrl: string;
       if (isLocal && blob) {
-        videoBlob = blob;
+        videoUrl = URL.createObjectURL(blob);
+      } else if (url) {
+        videoUrl = url;
       } else {
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-        const url = `${RPI_URL}/videos/${encodeURIComponent(filename)}`;
-        const res = await fetch(url);
-        if (!res.ok) return;
-        videoBlob = await res.blob();
+        videoUrl = `${RPI_URL}/videos/${encodeURIComponent(filename)}`;
       }
 
-      const videoUrl = URL.createObjectURL(videoBlob);
       const v = document.createElement('video');
       v.src = videoUrl;
       v.muted = true;
@@ -46,13 +44,15 @@ function VideoThumbnail({ filename, isLocal, blob }: { filename: string; isLocal
         if (ctx) ctx.drawImage(v, 0, 0, c.width, c.height);
         const data = c.toDataURL('image/jpeg', 0.6);
         setSrc(data);
-        URL.revokeObjectURL(videoUrl);
+        if (isLocal && blob) URL.revokeObjectURL(videoUrl);
       });
-      v.addEventListener('error', () => URL.revokeObjectURL(videoUrl));
+      v.addEventListener('error', () => {
+        if (isLocal && blob) URL.revokeObjectURL(videoUrl);
+      });
     };
 
     loadVideo();
-  }, [filename, isLocal, blob]);
+  }, [filename, isLocal, blob, url]);
 
   if (!src) return <div className="w-30 h-20 bg-muted rounded" />;
   return <img src={src} className="w-30 h-20 object-cover rounded" alt="thumbnail" />;
@@ -72,13 +72,11 @@ function VideoPlayer({ filename, videos }: { filename: string; videos: Video[] }
         if (blob) {
           setSrc(URL.createObjectURL(blob));
         }
+      } else if (video.url) {
+        setSrc(video.url);
       } else {
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-        if (video.url) {
-          setSrc(`${RPI_URL}${video.url}`);
-        } else {
-          setSrc(`${RPI_URL}/videos/${encodeURIComponent(filename)}`);
-        }
+        setSrc(`${RPI_URL}/videos/${encodeURIComponent(filename)}`);
       }
     };
 
@@ -117,26 +115,24 @@ export default function VideosPage() {
     const allVideos: Video[] = [];
 
     // Check RPi status
-    const rpiOk = await checkRpiStatus();
+    await checkRpiStatus();
 
-    // Load RPi videos
-    if (rpiOk) {
-      const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-      try {
-        const res = await fetch(`${RPI_URL}/videos`);
-        if (res.ok) {
-          const data = await res.json();
-          allVideos.push(...data.map((item: {name: string, url: string}) => ({
-            filename: item.name,
-            size: 0, // RPi doesn't provide size in simple list
-            timestamp: 0, // Would need to fetch individually
-            isLocal: false,
-            url: item.url
-          })));
-        }
-      } catch (e) {
-        console.error("Failed to load RPi videos", e);
+    // Load cloud videos
+    try {
+      const res = await fetch('/api/videos');
+      if (res.ok) {
+        const cloudVideos = await res.json();
+        allVideos.push(...cloudVideos.map((v: any) => ({
+          filename: v.filename,
+          size: v.size,
+          timestamp: v.timestamp,
+          isLocal: false,
+          url: v.url,
+          id: v.id
+        })));
       }
+    } catch (e) {
+      console.error("Failed to load cloud videos", e);
     }
 
     // Load local recordings
@@ -232,6 +228,46 @@ export default function VideosPage() {
   useEffect(() => {
     load();
     const interval = setInterval(async () => {
+      // Poll for videos
+      const allVideos: Video[] = [];
+
+      try {
+        const res = await fetch('/api/videos');
+        if (res.ok) {
+          const cloudVideos = await res.json();
+          allVideos.push(...cloudVideos.map((v: any) => ({
+            filename: v.filename,
+            size: v.size,
+            timestamp: v.timestamp,
+            isLocal: false,
+            url: v.url,
+            id: v.id
+          })));
+        }
+      } catch (e) {
+        console.error("Failed to load cloud videos", e);
+      }
+
+      // Add local recordings
+      try {
+        const { listRecordings } = await import('@/lib/recordings');
+        const localRecs = await listRecordings();
+        allVideos.push(...localRecs.map(rec => ({
+          filename: `local_${rec.id}.webm`,
+          size: rec.size,
+          timestamp: rec.timestamp,
+          isLocal: true,
+          id: rec.id
+        })));
+      } catch (e) {
+        console.error("Failed to load local recordings", e);
+      }
+
+      // Sort by timestamp descending
+      allVideos.sort((a, b) => b.timestamp - a.timestamp);
+      setVideos(allVideos);
+
+      // Poll for recording status if RPi connected
       if (rpiConnected) {
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
         try {
@@ -244,7 +280,8 @@ export default function VideosPage() {
           // Ignore
         }
       }
-    }, 2000); // Poll every 2 seconds
+    }, 5000); // Poll every 5 seconds
+
     return () => clearInterval(interval);
   }, [rpiConnected]);
 
@@ -309,7 +346,7 @@ export default function VideosPage() {
             <div className={`grid gap-4 ${isMobile ? 'grid-cols-1' : 'grid-cols-2 lg:grid-cols-3'}`}>
               {videos.map((v) => (
                 <div key={v.filename} className="p-4 border rounded-md bg-card">
-                  <VideoThumbnail filename={v.filename} isLocal={v.isLocal} />
+                  <VideoThumbnail filename={v.filename} isLocal={v.isLocal} url={v.url} />
                   <div className="mt-2">
                     <div className="font-medium">{v.filename} {v.isLocal && <span className="text-xs text-muted">(Local)</span>}</div>
                     <div className="text-sm text-muted-foreground">
@@ -330,9 +367,8 @@ export default function VideosPage() {
                             const url = URL.createObjectURL(blob);
                             window.open(url, "_blank");
                           }
-                        } else {
-                          const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-                          window.open(`${RPI_URL}${v.url}`, "_blank");
+                        } else if (v.url) {
+                          window.open(v.url, "_blank");
                         }
                       }}
                     >

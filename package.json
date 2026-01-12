@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@vercel/blob": "^1.0.0",
+    "@vercel/postgres": "^0.10.0",
     "@genkit-ai/google-genai": "^1.20.0",
     "@genkit-ai/next": "^1.20.0",
     "@hookform/resolvers": "^4.1.3",

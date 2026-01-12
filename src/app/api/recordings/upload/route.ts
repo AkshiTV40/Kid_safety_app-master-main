@@ -1,5 +1,6 @@
 import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
+import { sql } from '@vercel/postgres';
 import ffmpeg from 'fluent-ffmpeg';
 import { PassThrough } from 'stream';
 
@@ -37,6 +38,12 @@ export async function POST(req: Request) {
 
     const filename = `recording-${Date.now()}.mp4`;
     const blob = await put(filename, outputBuffer, { access: 'public' });
+
+    // Store metadata in DB
+    await sql`
+      INSERT INTO videos (filename, url, timestamp, size, device_id)
+      VALUES (${filename}, ${blob.url}, ${Date.now()}, ${outputBuffer.length}, 'rpi')
+    `;
 
     return NextResponse.json({ success: true, url: blob.url });
   } catch (e: any) {

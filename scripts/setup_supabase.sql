@@ -1,7 +1,7 @@
--- Supabase Setup Script for Kid Safety App
--- Run this in Supabase SQL Editor
+-- Simple Supabase Setup for Kid Safety App
+-- Run each command separately in Supabase SQL Editor
 
--- Create videos table
+-- 1. Create the videos table
 CREATE TABLE videos (
   id BIGSERIAL PRIMARY KEY,
   filename TEXT NOT NULL,
@@ -11,26 +11,27 @@ CREATE TABLE videos (
   device_id TEXT DEFAULT 'rpi'
 );
 
--- Enable Row Level Security
+-- 2. Enable security
 ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
 
--- Allow public read access
+-- 3. Allow anyone to read videos
 CREATE POLICY "Public read access" ON videos
 FOR SELECT TO anon
 USING (true);
 
--- Allow service role insert
+-- 4. Allow server to add videos
 CREATE POLICY "Allow insert" ON videos
 FOR INSERT TO service_role
 WITH CHECK (true);
 
--- Create storage bucket for videos
+-- 5. Create storage bucket for videos
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('videos', 'videos', true);
 
--- Allow public access to storage
+-- 6. Allow public access to video files
 CREATE POLICY "Public Access" ON storage.objects
 FOR SELECT USING (bucket_id = 'videos');
 
+-- 7. Allow uploads to videos bucket
 CREATE POLICY "Allow Uploads" ON storage.objects
 FOR INSERT WITH CHECK (bucket_id = 'videos');

@@ -2,6 +2,7 @@
 import os
 import time
 import threading
+import platform
 from datetime import datetime
 from flask import Flask, Response, jsonify, send_from_directory, request
 from flask_cors import CORS
@@ -9,6 +10,11 @@ from picamzero import Camera
 from gpiozero import Button
 import geocoder
 from dotenv import load_dotenv
+
+# Check if running on Raspberry Pi
+if platform.machine() not in ['armv7l', 'aarch64']:
+    print("❌ This backend must run on a Raspberry Pi with Pi Camera Zero.")
+    exit(1)
 
 # ---------------- CONFIG ---------------- #
 

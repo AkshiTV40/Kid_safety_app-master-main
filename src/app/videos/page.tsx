@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { ArrowLeft } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 type Video = {
   filename: string;
@@ -227,47 +228,18 @@ export default function VideosPage() {
 
   useEffect(() => {
     load();
+
+    // Subscribe to real-time video updates
+    const videosSubscription = supabase
+      .channel('videos')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'videos' }, (payload) => {
+        console.log('Video change:', payload);
+        load(); // Reload videos on any change
+      })
+      .subscribe();
+
+    // Poll for recording status if RPi connected (since status not in DB)
     const interval = setInterval(async () => {
-      // Poll for videos
-      const allVideos: Video[] = [];
-
-      try {
-        const res = await fetch('/api/videos');
-        if (res.ok) {
-          const cloudVideos = await res.json();
-          allVideos.push(...cloudVideos.map((v: any) => ({
-            filename: v.filename,
-            size: v.size,
-            timestamp: v.timestamp,
-            isLocal: false,
-            url: v.url,
-            id: v.id
-          })));
-        }
-      } catch (e) {
-        console.error("Failed to load cloud videos", e);
-      }
-
-      // Add local recordings
-      try {
-        const { listRecordings } = await import('@/lib/recordings');
-        const localRecs = await listRecordings();
-        allVideos.push(...localRecs.map(rec => ({
-          filename: `local_${rec.id}.webm`,
-          size: rec.size,
-          timestamp: rec.timestamp,
-          isLocal: true,
-          id: rec.id
-        })));
-      } catch (e) {
-        console.error("Failed to load local recordings", e);
-      }
-
-      // Sort by timestamp descending
-      allVideos.sort((a, b) => b.timestamp - a.timestamp);
-      setVideos(allVideos);
-
-      // Poll for recording status if RPi connected
       if (rpiConnected) {
         const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
         try {
@@ -280,9 +252,12 @@ export default function VideosPage() {
           // Ignore
         }
       }
-    }, 5000); // Poll every 5 seconds
+    }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      videosSubscription.unsubscribe();
+      clearInterval(interval);
+    };
   }, [rpiConnected]);
 
   return (

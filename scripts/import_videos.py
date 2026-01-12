@@ -5,16 +5,15 @@ Run this on your local machine with internet access
 """
 
 import os
+import time
 import requests
-from supabase import create_client, Client
+from supabase import create_client
 
-# Supabase credentials
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # Use service role for server operations
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# List of Google Drive video links
 VIDEO_LINKS = [
     "https://drive.google.com/uc?id=1nbPXnr26pgJj9CobCEEgUNKxwgjvkAga",
     "https://drive.google.com/uc?id=10d2mLTJ4phxO9nSlQsoFCdkcRittq3tG",
@@ -26,42 +25,34 @@ VIDEO_LINKS = [
     "https://drive.google.com/uc?id=1qnj0OhpNKG5dg57lFE-9Q0K4yr1aACKD"
 ]
 
-def download_and_upload(url: str, filename: str):
-    print(f"Downloading {filename}...")
-    response = requests.get(url)
-    if response.status_code != 200:
-        print(f"Failed to download {filename}")
+def download_and_upload(url, filename):
+    print(f"⬇ Downloading {filename}")
+    r = requests.get(url, stream=True)
+    if r.status_code != 200:
+        print("❌ Download failed")
         return
 
-    video_data = response.content
+    data = r.content
 
-    print(f"Uploading {filename} to Supabase...")
-    bucket = supabase.storage.from_('videos')
-    result = bucket.upload(filename, video_data, {"content-type": "video/mp4"})
+    print(f"⬆ Uploading {filename}")
+    res = supabase.storage.from_("videos").upload(
+        filename,
+        data,
+        file_options={"content-type": "video/mp4", "upsert": True}
+    )
 
-    if result.status_code == 200:
-        # Get public URL
-        public_url = supabase.storage.from_('videos').get_public_url(filename)
-
-        # Save metadata
-        supabase.table('videos').insert({
+    if res:
+        public_url = supabase.storage.from_("videos").get_public_url(filename)
+        supabase.table("videos").insert({
             "filename": filename,
             "url": public_url,
             "timestamp": int(time.time() * 1000),
-            "size": len(video_data),
+            "size": len(data),
             "device_id": "imported"
         }).execute()
-
-        print(f"✅ Successfully imported {filename}")
-    else:
-        print(f"❌ Failed to upload {filename}: {result}")
+        print("✅ Done")
 
 if __name__ == "__main__":
-    import time
-
     for i, link in enumerate(VIDEO_LINKS):
-        filename = f"imported_video_{i+1}.mp4"
-        download_and_upload(link, filename)
-        time.sleep(1)  # Rate limiting
-
-    print("Import complete!")
+        download_and_upload(link, f"imported_{i+1}.mp4")
+        time.sleep(1)

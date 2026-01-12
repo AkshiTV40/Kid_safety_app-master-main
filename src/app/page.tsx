@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Logo } from '@/components/logo';
 import { Smartphone, ShieldCheck, Zap, Users } from 'lucide-react';
 import Image from 'next/image';
@@ -35,7 +34,7 @@ export default function Home() {
           <span className="sr-only">Guardian Keychain</span>
         </Link>
         <nav className="ml-auto flex gap-4 sm:gap-6">
-          <Badge variant={rpiStatus === 'connected' ? 'default' : 'destructive'}>RPi: {rpiStatus}</Badge>
+          <span className="text-sm text-muted-foreground">RPi: {rpiStatus}</span>
           <Link href="/location" className="text-sm font-medium hover:underline underline-offset-4" prefetch={false}>
             Location
           </Link>

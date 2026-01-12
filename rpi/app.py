@@ -11,6 +11,8 @@ from picamzero import Camera
 from gpiozero import Button
 import geocoder
 from dotenv import load_dotenv
+import serial
+import serial.tools.list_ports
 
 # ---------------- CONFIG ---------------- #
 
@@ -35,6 +37,7 @@ CORS(app)
 cam = Camera()
 camera_lock = threading.Lock()
 recording = False
+recording_thread = None
 latest_frame = None
 
 def capture_preview_loop():
@@ -46,20 +49,63 @@ def capture_preview_loop():
             latest_frame = frame
         time.sleep(0.1)
 
-def record_video(duration=10):
-    global recording
-    if recording:
-        return
+def start_recording():
+    global recording, recording_thread
+    if recording or recording_thread and recording_thread.is_alive():
+        return False
 
     recording = True
     filename = f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
     filepath = os.path.join(VIDEOS_DIR, filename)
 
-    with camera_lock:
-        cam.take_video(filepath, duration=duration)
+    def record():
+        global recording
+        with camera_lock:
+            cam.start_recording(filepath)
+            while recording:
+                time.sleep(0.1)
+            cam.stop_recording()
+        print(f"Saved video: {filepath}")
 
+    recording_thread = threading.Thread(target=record, daemon=True)
+    recording_thread.start()
+    return True
+
+def stop_recording():
+    global recording
+    if not recording:
+        return False
     recording = False
-    print(f"Saved video: {filepath}")
+    return True
+
+def find_usb_serial_port():
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        if 'USB' in port.description or 'ttyACM' in port.device or 'ttyUSB' in port.device:
+            return port.device
+    return None
+
+def usb_button_listener():
+    port = find_usb_serial_port()
+    if not port:
+        print("No USB serial device found for buttons")
+        return
+
+    try:
+        ser = serial.Serial(port, 9600, timeout=1)
+        print(f"Listening for USB buttons on {port}")
+        while True:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').strip()
+                if line == 'start':
+                    start_recording()
+                    print("USB: Started recording")
+                elif line == 'stop':
+                    stop_recording()
+                    print("USB: Stopped recording")
+            time.sleep(0.1)
+    except Exception as e:
+        print(f"USB serial error: {e}")
 
 # ---------------- LOCATION ---------------- #
 
@@ -163,10 +209,24 @@ def list_videos():
 def get_video(filename):
     return send_from_directory(VIDEOS_DIR, filename)
 
-@app.route("/record", methods=["POST"])
-def record():
-    threading.Thread(target=record_video, daemon=True).start()
-    return jsonify({"status": "recording_started"})
+@app.route("/record/start", methods=["POST"])
+def start_record():
+    if start_recording():
+        return jsonify({"status": "recording_started"})
+    else:
+        return jsonify({"status": "already_recording"}), 409
+
+@app.route("/record/stop", methods=["POST"])
+def stop_record():
+    if stop_recording():
+        return jsonify({"status": "recording_stopped"})
+    else:
+        return jsonify({"status": "not_recording"}), 409
+
+@app.route("/record/status")
+def record_status():
+    global recording
+    return jsonify({"recording": recording})
 
 @app.route("/camera/stream")
 def stream():
@@ -190,4 +250,5 @@ def stream():
 
 if __name__ == "__main__":
     threading.Thread(target=capture_preview_loop, daemon=True).start()
+    threading.Thread(target=usb_button_listener, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)

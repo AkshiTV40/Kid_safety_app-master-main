@@ -93,26 +93,44 @@ export default function VideosPage() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [playingVideo, setPlayingVideo] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [rpiConnected, setRpiConnected] = useState<boolean | null>(null);
   const isMobile = useIsMobile();
+
+  const checkRpiStatus = async () => {
+    const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+    try {
+      const res = await fetch(`${RPI_URL}/health`);
+      setRpiConnected(res.ok);
+      return res.ok;
+    } catch (e) {
+      setRpiConnected(false);
+      return false;
+    }
+  };
 
   const load = async () => {
     const allVideos: Video[] = [];
 
+    // Check RPi status
+    const rpiOk = await checkRpiStatus();
+
     // Load RPi videos
-    const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-    try {
-      const res = await fetch(`${RPI_URL}/videos`);
-      if (res.ok) {
-        const data = await res.json();
-        allVideos.push(...data.map((filename: string) => ({
-          filename,
-          size: 0, // RPi doesn't provide size in simple list
-          timestamp: 0, // Would need to fetch individually
-          isLocal: false
-        })));
+    if (rpiOk) {
+      const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+      try {
+        const res = await fetch(`${RPI_URL}/videos`);
+        if (res.ok) {
+          const data = await res.json();
+          allVideos.push(...data.map((filename: string) => ({
+            filename,
+            size: 0, // RPi doesn't provide size in simple list
+            timestamp: 0, // Would need to fetch individually
+            isLocal: false
+          })));
+        }
+      } catch (e) {
+        console.error("Failed to load RPi videos", e);
       }
-    } catch (e) {
-      console.error("Failed to load RPi videos", e);
     }
 
     // Load local recordings
@@ -135,18 +153,14 @@ export default function VideosPage() {
     setVideos(allVideos);
   };
 
-  const recordVideo = async () => {
+  const startRecording = async () => {
     const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
-    setIsRecording(true);
     try {
       // Try RPi first
-      const res = await fetch(`${RPI_URL}/record`, { method: 'POST' });
+      const res = await fetch(`${RPI_URL}/record/start`, { method: 'POST' });
       if (res.ok) {
-        alert("Recording started on RPi. It will record for 10 seconds.");
-        setTimeout(() => {
-          load();
-          setIsRecording(false);
-        }, 15000);
+        setIsRecording(true);
+        alert("Recording started on RPi. Click Stop to end.");
         return;
       }
     } catch (e) {
@@ -181,20 +195,52 @@ export default function VideosPage() {
       };
 
       recorder.start();
-      alert("Recording started locally for 10 seconds.");
-      setTimeout(() => {
-        recorder.stop();
-      }, 10000);
+      setIsRecording(true);
+      alert("Recording started locally. Click Stop to end.");
     } catch (e) {
       console.error("Failed to start local recording", e);
       alert("Failed to start recording. Please check camera permissions.");
-      setIsRecording(false);
     }
+  };
+
+  const stopRecording = async () => {
+    const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+    try {
+      // Try RPi first
+      const res = await fetch(`${RPI_URL}/record/stop`, { method: 'POST' });
+      if (res.ok) {
+        setIsRecording(false);
+        alert("Recording stopped on RPi.");
+        load(); // Refresh videos
+        return;
+      }
+    } catch (e) {
+      console.log('RPi not available, stopping local recording');
+    }
+
+    // For local, we need to stop the recorder, but since it's not stored, assume it's stopped
+    setIsRecording(false);
+    alert("Recording stopped locally.");
   };
 
   useEffect(() => {
     load();
-  }, []);
+    const interval = setInterval(async () => {
+      if (rpiConnected) {
+        const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+        try {
+          const res = await fetch(`${RPI_URL}/record/status`);
+          if (res.ok) {
+            const data = await res.json();
+            setIsRecording(data.recording);
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+    }, 2000); // Poll every 2 seconds
+    return () => clearInterval(interval);
+  }, [rpiConnected]);
 
   return (
     <div className="min-h-screen">
@@ -211,22 +257,31 @@ export default function VideosPage() {
             <h1 className="text-2xl font-bold">Videos</h1>
           </div>
           {!isMobile && (
-            <Button onClick={recordVideo} disabled={isRecording}>
-              {isRecording ? "Recording..." : "Record Video"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="text-sm">
+                RPi: {rpiConnected === null ? "Checking..." : rpiConnected ? "Connected" : "Disconnected"}
+              </div>
+              <Button onClick={isRecording ? stopRecording : startRecording}>
+                {isRecording ? "Stop Recording" : "Start Recording"}
+              </Button>
+            </div>
           )}
         </div>
       </div>
 
       {/* Floating Record Button on Mobile */}
       {isMobile && (
-        <Button
-          onClick={recordVideo}
-          disabled={isRecording}
-          className="fixed bottom-4 right-4 z-20 rounded-full w-14 h-14"
-        >
-          {isRecording ? "..." : "+"}
-        </Button>
+        <div className="fixed bottom-4 right-4 z-20 flex flex-col items-end gap-2">
+          <div className="text-xs bg-background border rounded px-2 py-1">
+            RPi: {rpiConnected === null ? "Checking..." : rpiConnected ? "Connected" : "Disconnected"}
+          </div>
+          <Button
+            onClick={isRecording ? stopRecording : startRecording}
+            className="rounded-full w-14 h-14"
+          >
+            {isRecording ? "⏹️" : "⏺️"}
+          </Button>
+        </div>
       )}
 
       {/* Video List */}

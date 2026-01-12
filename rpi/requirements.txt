@@ -12,3 +12,6 @@ picamzero
 
 # Geolocation support for IP-based location
 geocoder
+
+# Serial communication for USB buttons
+pyserial

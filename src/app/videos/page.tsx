@@ -13,6 +13,7 @@ type Video = {
   timestamp: number;
   isLocal?: boolean;
   id?: string;
+  url?: string;
 };
 
 function VideoThumbnail({ filename, isLocal, blob }: { filename: string; isLocal?: boolean; blob?: Blob }) {
@@ -121,11 +122,12 @@ export default function VideosPage() {
         const res = await fetch(`${RPI_URL}/videos`);
         if (res.ok) {
           const data = await res.json();
-          allVideos.push(...data.map((filename: string) => ({
-            filename,
+          allVideos.push(...data.map((item: {name: string, url: string}) => ({
+            filename: item.name,
             size: 0, // RPi doesn't provide size in simple list
             timestamp: 0, // Would need to fetch individually
-            isLocal: false
+            isLocal: false,
+            url: item.url
           })));
         }
       } catch (e) {
@@ -314,6 +316,8 @@ export default function VideosPage() {
                             const url = URL.createObjectURL(blob);
                             window.open(url, "_blank");
                           }
+                        } else if (v.url) {
+                          window.open(v.url, "_blank");
                         } else {
                           const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
                           window.open(`${RPI_URL}/videos/${encodeURIComponent(v.filename)}`, "_blank");

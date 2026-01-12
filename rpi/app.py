@@ -2,30 +2,22 @@
 import os
 import time
 import threading
-import subprocess
-import json
 from datetime import datetime
-from flask import Flask, Response, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from picamzero import Camera
 from gpiozero import Button
 import geocoder
-from dotenv import load_dotenv
-import serial
-import serial.tools.list_ports
 
 # ---------------- CONFIG ---------------- #
 
-load_dotenv()
+PORT = 8000
+HELP_PIN = 17
 
-DEVICE_ID = os.getenv("DEVICE_ID", "raspi")
-HELP_PIN = int(os.getenv("HELP_BUTTON_PIN", "17"))
-PORT = int(os.getenv("STREAM_PORT", "8000"))
+BASE_DIR = "/home/pi/raspi-backend"
+VIDEOS_DIR = f"{BASE_DIR}/videos"
 
-VIDEOS_DIR = "/home/pi/raspi-backend/videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
-
-CACHE_FILE = "/home/pi/raspi-backend/location_cache.json"
 
 # ---------------- APP ---------------- #
 
@@ -137,37 +129,23 @@ def save_cached_location(loc):
         pass
 
 def get_location():
-    wifi_ssid = get_wifi_ssid()
-
-    # Try online location
     try:
         g = geocoder.ip("me")
-        if g.ok:
-            loc = {
-                "lat": g.latlng[0],
-                "lng": g.latlng[1],
-                "timestamp": int(time.time()),
+        if g.ok and g.latlng:
+            return {
+                "latitude": g.latlng[0],
+                "longitude": g.latlng[1],
                 "method": "ip",
-                "wifi_ssid": wifi_ssid
+                "timestamp": int(time.time())
             }
-            save_cached_location(loc)
-            return loc
     except:
         pass
 
-    # Fallback to cached location
-    cached = load_cached_location()
-    if cached:
-        cached["wifi_ssid"] = wifi_ssid
-        return cached
-
-    # Ultimate fallback
     return {
-        "lat": 0.0,
-        "lng": 0.0,
-        "timestamp": int(time.time()),
+        "latitude": 0,
+        "longitude": 0,
         "method": "fallback",
-        "wifi_ssid": wifi_ssid
+        "timestamp": int(time.time())
     }
 
 # ---------------- BUTTON ---------------- #
@@ -190,20 +168,19 @@ def health():
 
 @app.route("/location")
 def location():
-    loc = get_location()
-    return jsonify({
-        "device_id": DEVICE_ID,
-        "latitude": loc["lat"],
-        "longitude": loc["lng"],
-        "timestamp": loc["timestamp"],
-        "method": loc["method"],
-        "wifi_ssid": loc.get("wifi_ssid", "unknown")
-    })
+    return jsonify(get_location())
 
 @app.route("/videos")
 def list_videos():
-    files = sorted(os.listdir(VIDEOS_DIR), reverse=True)
-    return jsonify(files)
+    base = request.host_url.rstrip("/")
+    files = sorted(
+        [f for f in os.listdir(VIDEOS_DIR) if f.endswith(".mp4")],
+        reverse=True
+    )
+    return jsonify([
+        {"name": f, "url": f"{base}/videos/{f}"}
+        for f in files
+    ])
 
 @app.route("/videos/<filename>")
 def get_video(filename):
@@ -225,8 +202,7 @@ def stop_record():
 
 @app.route("/record/status")
 def record_status():
-    global recording
-    return jsonify({"recording": recording})
+    return jsonify({"recording": is_recording})
 
 @app.route("/camera/stream")
 def stream():

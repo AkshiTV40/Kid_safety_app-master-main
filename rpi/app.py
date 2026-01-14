@@ -11,6 +11,7 @@ from gpiozero import Button
 import geocoder
 from dotenv import load_dotenv
 import requests
+from collections import deque
 
 # Check if running on Raspberry Pi
 if platform.machine() not in ['armv7l', 'aarch64']:
@@ -28,6 +29,10 @@ PORT = int(os.getenv("STREAM_PORT", "8000"))
 # Sync configuration
 SYNC_BASE_URL = os.getenv("SYNC_BASE_URL", "https://your-vercel-app.vercel.app")
 USER_ID = os.getenv("USER_ID")  # UUID of the user this device belongs to
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+
+# Upload queue for retry
+upload_queue = deque()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
@@ -85,19 +90,8 @@ def record_video(duration=10):
         camera.stop_recording()
         print("✅ Saved locally:", filepath)
 
-        # Upload to Vercel API
-        with open(filepath, 'rb') as f:
-            files = {'file': (filename, f, 'video/mp4')}
-            data = {'device_id': DEVICE_ID}
-            if USER_ID:
-                data['user_id'] = USER_ID
-            response = requests.post(UPLOAD_URL, files=files, data=data)
-            if response.status_code == 200:
-                data = response.json()
-                video_url = data['url']
-                print("✅ Uploaded to Vercel:", video_url)
-            else:
-                print("❌ Upload failed:", response.text)
+        # Queue for upload
+        upload_queue.append(filepath)
 
     except Exception as e:
         print("❌ Error:", e)
@@ -107,6 +101,14 @@ def record_video(duration=10):
 # ---------------- LOCATION & SYNC ---------------- #
 
 def get_location():
+    if DEMO_MODE:
+        return {
+            "latitude": 37.7397,  # Tracy, CA
+            "longitude": -121.4252,
+            "method": "demo",
+            "timestamp": int(time.time())
+        }
+
     try:
         g = geocoder.ip("me")
         if g.ok and g.latlng:
@@ -173,6 +175,32 @@ def sync_device_status():
     except Exception as e:
         print("❌ Device sync failed:", e)
 
+def upload_worker():
+    """Background thread to retry uploads"""
+    while True:
+        if upload_queue:
+            path = upload_queue[0]
+            try:
+                with open(path, 'rb') as f:
+                    files = {'file': (os.path.basename(path), f, 'video/mp4')}
+                    data = {'device_id': DEVICE_ID}
+                    if USER_ID:
+                        data['user_id'] = USER_ID
+                    response = requests.post(UPLOAD_URL, files=files, data=data, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    video_url = data['url']
+                    print("☁️ Uploaded:", path)
+                    upload_queue.popleft()
+                else:
+                    print("Upload failed, retrying:", response.text)
+                    time.sleep(5)
+            except Exception as e:
+                print("Upload error, retrying:", e)
+                time.sleep(5)
+        else:
+            time.sleep(1)
+
 def start_sync_loop():
     """Background thread to sync location and status periodically"""
     def sync_loop():
@@ -202,6 +230,15 @@ def index():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+
+@app.route("/demo")
+def demo():
+    return jsonify({
+        "status": "Demo Mode Active" if DEMO_MODE else "Production Mode",
+        "device": DEVICE_ID,
+        "uploads_pending": len(upload_queue),
+        "sync": sync_enabled
+    })
 
 @app.route("/location")
 def location():
@@ -272,6 +309,7 @@ def stream():
 
 if __name__ == "__main__":
     threading.Thread(target=capture_preview_loop, daemon=True).start()
+    threading.Thread(target=upload_worker, daemon=True).start()  # Start upload worker
     start_sync_loop()  # Start background sync
     print("🚀 Raspberry Pi backend running")
     app.run(host="0.0.0.0", port=PORT, threaded=True)

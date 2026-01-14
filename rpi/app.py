@@ -3,6 +3,7 @@ import os
 import time
 import threading
 import platform
+import subprocess
 from datetime import datetime
 from flask import Flask, Response, jsonify, send_from_directory, request
 from flask_cors import CORS
@@ -201,6 +202,73 @@ def upload_worker():
         else:
             time.sleep(1)
 
+def scan_wifi():
+    """Scan for nearby WiFi networks"""
+    try:
+        result = subprocess.run(['sudo', 'iwlist', 'wlan0', 'scan'], capture_output=True, text=True, timeout=10)
+        networks = []
+        current = {}
+        for line in result.stdout.split('\n'):
+            line = line.strip()
+            if line.startswith('Cell '):
+                if current:
+                    networks.append(current)
+                current = {}
+            elif 'Address:' in line:
+                current['mac'] = line.split()[-1]
+            elif 'ESSID:' in line:
+                current['ssid'] = line.split('"')[1] if '"' in line else ''
+            elif 'Encryption key:' in line:
+                current['encrypted'] = 'on' in line
+        if current:
+            networks.append(current)
+        return networks
+    except Exception as e:
+        print("WiFi scan error:", e)
+        return []
+
+def connect_wifi(ssid, password=None):
+    """Connect to WiFi network"""
+    try:
+        if password:
+            result = subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password], capture_output=True, text=True, timeout=30)
+        else:
+            result = subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid], capture_output=True, text=True, timeout=30)
+        return result.returncode == 0
+    except Exception as e:
+        print("WiFi connect error:", e)
+        return False
+
+def scan_devices():
+    """Scan for devices on the current network"""
+    try:
+        result = subprocess.run(['sudo', 'arp-scan', '--localnet', '--quiet'], capture_output=True, text=True, timeout=15)
+        devices = []
+        for line in result.stdout.split('\n'):
+            parts = line.split('\t')
+            if len(parts) >= 3:
+                ip, mac, vendor = parts[0], parts[1], parts[2] if len(parts) > 2 else ''
+                devices.append({'ip': ip, 'mac': mac, 'vendor': vendor})
+        return devices
+    except Exception as e:
+        print("Device scan error:", e)
+        return []
+
+def wifi_manager():
+    """Background thread for WiFi management"""
+    while True:
+        networks = scan_wifi()
+        print(f"Found {len(networks)} WiFi networks")
+        for net in networks:
+            if not net.get('encrypted', True):  # Connect to open networks
+                if connect_wifi(net['ssid']):
+                    print(f"Connected to {net['ssid']}")
+                    devices = scan_devices()
+                    print(f"Found {len(devices)} devices on network")
+                    # Here, could establish connections or sync
+                    break
+        time.sleep(60)  # Scan every minute
+
 def start_sync_loop():
     """Background thread to sync location and status periodically"""
     def sync_loop():
@@ -239,6 +307,26 @@ def demo():
         "uploads_pending": len(upload_queue),
         "sync": sync_enabled
     })
+
+@app.route("/wifi/scan")
+def wifi_scan():
+    networks = scan_wifi()
+    return jsonify(networks)
+
+@app.route("/wifi/connect", methods=["POST"])
+def wifi_connect():
+    data = request.json
+    ssid = data.get('ssid')
+    password = data.get('password')
+    if not ssid:
+        return jsonify({"error": "SSID required"}), 400
+    success = connect_wifi(ssid, password)
+    return jsonify({"connected": success})
+
+@app.route("/devices/scan")
+def devices_scan():
+    devices = scan_devices()
+    return jsonify(devices)
 
 @app.route("/location")
 def location():
@@ -310,6 +398,7 @@ def stream():
 if __name__ == "__main__":
     threading.Thread(target=capture_preview_loop, daemon=True).start()
     threading.Thread(target=upload_worker, daemon=True).start()  # Start upload worker
+    threading.Thread(target=wifi_manager, daemon=True).start()  # Start WiFi manager
     start_sync_loop()  # Start background sync
     print("🚀 Raspberry Pi backend running")
     app.run(host="0.0.0.0", port=PORT, threaded=True)

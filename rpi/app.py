@@ -25,11 +25,21 @@ DEVICE_ID = os.getenv("DEVICE_ID", "raspi")
 HELP_PIN = int(os.getenv("HELP_BUTTON_PIN", "17"))
 PORT = int(os.getenv("STREAM_PORT", "8000"))
 
+# Sync configuration
+SYNC_BASE_URL = os.getenv("SYNC_BASE_URL", "https://your-vercel-app.vercel.app")
+USER_ID = os.getenv("USER_ID")  # UUID of the user this device belongs to
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
-UPLOAD_URL = os.getenv("UPLOAD_URL", "https://your-vercel-app.vercel.app/api/recordings/upload")
+UPLOAD_URL = os.getenv("UPLOAD_URL", f"{SYNC_BASE_URL}/api/recordings/upload")
+
+sync_enabled = bool(SYNC_BASE_URL and USER_ID)
+if sync_enabled:
+    print("Sync enabled")
+else:
+    print("Warning: Sync disabled - SYNC_BASE_URL or USER_ID not set")
 
 # ---------------- APP ---------------- #
 
@@ -78,7 +88,10 @@ def record_video(duration=10):
         # Upload to Vercel API
         with open(filepath, 'rb') as f:
             files = {'file': (filename, f, 'video/mp4')}
-            response = requests.post(UPLOAD_URL, files=files)
+            data = {'device_id': DEVICE_ID}
+            if USER_ID:
+                data['user_id'] = USER_ID
+            response = requests.post(UPLOAD_URL, files=files, data=data)
             if response.status_code == 200:
                 data = response.json()
                 video_url = data['url']
@@ -91,7 +104,7 @@ def record_video(duration=10):
     finally:
         is_recording = False
 
-# ---------------- LOCATION ---------------- #
+# ---------------- LOCATION & SYNC ---------------- #
 
 def get_location():
     try:
@@ -112,6 +125,65 @@ def get_location():
         "method": "fallback",
         "timestamp": int(time.time())
     }
+
+def sync_location():
+    """Sync current location via API"""
+    if not sync_enabled:
+        return
+
+    try:
+        loc = get_location()
+        if loc["latitude"] != 0.0 or loc["longitude"] != 0.0:
+            data = {
+                "user_id": USER_ID,
+                "device_id": DEVICE_ID,
+                "latitude": loc["latitude"],
+                "longitude": loc["longitude"],
+                "timestamp": loc["timestamp"],
+                "method": loc["method"]
+            }
+            response = requests.post(f"{SYNC_BASE_URL}/api/location/sync", json=data)
+            if response.status_code == 200:
+                print("Location synced")
+            else:
+                print("Location sync failed:", response.text)
+    except Exception as e:
+        print("❌ Location sync failed:", e)
+
+def sync_device_status():
+    """Update device status via API"""
+    if not sync_enabled:
+        return
+
+    try:
+        loc = get_location()
+        data = {
+            "user_id": USER_ID,
+            "device_id": DEVICE_ID,
+            "name": f"Raspberry Pi ({DEVICE_ID})",
+            "type": "rpi",
+            "is_online": True,
+            "location": loc
+        }
+        response = requests.post(f"{SYNC_BASE_URL}/api/devices/sync", json=data)
+        if response.status_code == 200:
+            print("Device status synced")
+        else:
+            print("Device sync failed:", response.text)
+    except Exception as e:
+        print("❌ Device sync failed:", e)
+
+def start_sync_loop():
+    """Background thread to sync location and status periodically"""
+    def sync_loop():
+        while True:
+            sync_location()
+            sync_device_status()
+            time.sleep(300)  # Sync every 5 minutes
+
+    if sync_enabled:
+        threading.Thread(target=sync_loop, daemon=True).start()
+        print("Started sync loop")
 
 # ---------------- BUTTON ---------------- #
 
@@ -200,5 +272,6 @@ def stream():
 
 if __name__ == "__main__":
     threading.Thread(target=capture_preview_loop, daemon=True).start()
+    start_sync_loop()  # Start background sync
     print("🚀 Raspberry Pi backend running")
     app.run(host="0.0.0.0", port=PORT, threaded=True)

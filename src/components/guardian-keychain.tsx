@@ -236,6 +236,17 @@ export default function GuardianKeychain() {
       const message = location ? `SOS! Location: ${location.latitude}, ${location.longitude}` : 'SOS! Help needed!';
       await requestHelp('child-1', { message });
 
+      // Send help request to RPi if configured
+      const rpiUrl = process.env.NEXT_PUBLIC_RPI_URL;
+      if (rpiUrl) {
+        try {
+          await fetch(`${rpiUrl}/help`, { method: 'POST' });
+          console.log('Help request sent to RPi');
+        } catch (e) {
+          console.error('Failed to send help to RPi:', e);
+        }
+      }
+
       toast({
         title: 'SOS Alert Sent',
         description: `Notifying ${guardianCount} guardian${guardianCount !== 1 ? 's' : ''} and emergency services.`,

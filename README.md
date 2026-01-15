@@ -46,6 +46,36 @@ Pushing to GitHub
   - `git add . && git commit -m "feat: recordings viewer, upload endpoint, tests"`
   - Create a GitHub repo on the web and `git remote add origin <url>` then `git push -u origin recordings-improvements`.
 
+Raspberry Pi Setup with Ngrok
+------------------------------
+
+To enable direct communication from the app to the Raspberry Pi (RPi) for triggering recordings and other actions:
+
+1. On the RPi, run the setup script (installs both app and ngrok services for autorun):
+   ```bash
+   cd rpi
+   sudo ./setup_rpi.sh
+   ```
+
+2. Install ngrok auth token (recommended for persistent tunnels):
+   - Sign up at https://ngrok.com
+   - Get your auth token
+   - Set `NGROK_AUTH_TOKEN` in `rpi/.env`
+   - For a static domain, upgrade to a paid plan and reserve a domain (e.g., `your-app.ngrok.io`)
+
+3. The services will start automatically on boot. Check status:
+   ```bash
+   sudo systemctl status guardian_rpi
+   sudo systemctl status ngrok
+   ```
+   Ngrok tunnel will be available at the configured domain.
+
+5. In the app, set the environment variable:
+   - Copy `.env.example` to `.env.local`
+   - Set `NEXT_PUBLIC_RPI_URL=https://your-ngrok-url.ngrok.io`
+
+6. Restart the app. Now, pressing SOS will also send a help request to the RPi, triggering recording.
+
 License
 
 - MIT — see `LICENSE` file.

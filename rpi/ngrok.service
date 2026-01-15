@@ -1,0 +1,18 @@
+[Unit]
+Description=Ngrok Tunnel for Guardian RPi
+After=network.target
+Wants=guardian_rpi.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/guardian-keychain/rpi
+EnvironmentFile=/home/pi/guardian-keychain/rpi/.env
+ExecStart=/home/pi/guardian-keychain/rpi/start_ngrok.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

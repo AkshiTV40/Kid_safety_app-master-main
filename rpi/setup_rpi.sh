@@ -64,6 +64,22 @@ if [ "${SKIP_PICAMERA:-0}" != "1" ]; then
   fi
 fi
 
+# Install ngrok for tunneling
+echo "Installing ngrok..."
+if [ "$IS_PI" -eq 1 ]; then
+  # For Raspberry Pi (ARM)
+  wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm.tgz -O /tmp/ngrok.tgz
+  tar -xzf /tmp/ngrok.tgz -C /usr/local/bin/
+  rm /tmp/ngrok.tgz
+else
+  # For other systems
+  wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz -O /tmp/ngrok.tgz
+  tar -xzf /tmp/ngrok.tgz -C /usr/local/bin/
+  rm /tmp/ngrok.tgz
+fi
+chmod +x /usr/local/bin/ngrok
+echo "Ngrok installed. Note: You need to set up ngrok auth token for persistent tunnels."
+
 # Create virtualenv
 if [ ! -d "$VENV_DIR" ]; then
   echo "Creating virtualenv at $VENV_DIR"
@@ -101,7 +117,7 @@ echo "Creating videos directory at /home/pi/raspi-backend/videos"
 mkdir -p /home/pi/raspi-backend/videos
 chown "$SERVICE_USER:$SERVICE_USER" /home/pi/raspi-backend/videos
 
-# Create systemd service file
+# Create systemd service file for guardian app
 echo "Writing systemd unit to $SERVICE_FILE_PATH"
 cat > "$SERVICE_FILE_PATH" <<EOF
 [Unit]
@@ -122,10 +138,36 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# Enable and start service
+# Create systemd service file for ngrok
+NGROK_SERVICE_FILE_PATH="/etc/systemd/system/ngrok.service"
+echo "Writing ngrok systemd unit to $NGROK_SERVICE_FILE_PATH"
+cat > "$NGROK_SERVICE_FILE_PATH" <<EOF
+[Unit]
+Description=Ngrok Tunnel for Guardian RPi
+After=network.target
+Wants=guardian_rpi.service
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+WorkingDirectory=$PROJECT_DIR/rpi
+EnvironmentFile=$PROJECT_DIR/rpi/.env
+ExecStart=$PROJECT_DIR/rpi/start_ngrok.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start services
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME" || true
+systemctl enable ngrok
+systemctl restart ngrok || true
 
 echo "Setup complete. Service status (last 20 lines):"
 journalctl -u "$SERVICE_NAME" -n 20 --no-pager || true

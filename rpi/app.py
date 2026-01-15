@@ -19,9 +19,12 @@ from io import BytesIO
 import json
 
 # Check if running on Raspberry Pi
-if platform.machine() not in ['armv7l', 'aarch64']:
-    print("❌ This backend must run on a Raspberry Pi with Pi Camera Zero.")
-    exit(1)
+IS_RPI = platform.machine() in ['armv7l', 'aarch64']
+if IS_RPI:
+    from picamzero import Camera
+else:
+    print("⚠️ Running in demo mode (no camera)")
+    Camera = None
 
 # ---------------- CONFIG ---------------- #
 
@@ -74,9 +77,12 @@ CORS(app)
 
 # ---------------- CAMERA ---------------- #
 
-camera = Camera()
-camera.resolution = (1280, 720)
-camera.framerate = 24
+if IS_RPI:
+    camera = Camera()
+    camera.resolution = (1280, 720)
+    camera.framerate = 24
+else:
+    camera = None
 
 recording_lock = threading.Lock()
 is_recording = False
@@ -84,7 +90,12 @@ is_recording = False
 def preview_loop():
     while True:
         try:
-            camera.capture_image(PREVIEW_FILE)
+            if camera:
+                camera.capture_image(PREVIEW_FILE)
+            else:
+                # Create a dummy image for demo
+                with open(PREVIEW_FILE, "wb") as f:
+                    f.write(b"dummy image data")
         except Exception as e:
             print("Preview error:", e)
         time.sleep(0.15)
@@ -102,9 +113,15 @@ def record_video(duration=120):
 
     try:
         print("🎥 Recording:", filename)
-        camera.start_recording(filepath)
-        time.sleep(duration)
-        camera.stop_recording()
+        if camera:
+            camera.start_recording(filepath)
+            time.sleep(duration)
+            camera.stop_recording()
+        else:
+            # Simulate recording
+            time.sleep(duration)
+            with open(filepath, "w") as f:
+                f.write("dummy video")
         print("✅ Saved:", filename)
 
         # Queue for upload

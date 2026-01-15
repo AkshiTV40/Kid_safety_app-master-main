@@ -15,3 +15,17 @@ geocoder
 
 # Serial communication for USB buttons
 pyserial
+
+# AI detection
+opencv-python-headless
+numpy
+
+# WebRTC streaming
+aiortc
+av
+
+# QR code generation
+qrcode[pil]
+
+# Audio
+pyaudio

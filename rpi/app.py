@@ -7,12 +7,22 @@ import subprocess
 from datetime import datetime
 from flask import Flask, Response, jsonify, send_from_directory, request
 from flask_cors import CORS
-from picamzero import Camera
-from gpiozero import Button
+import cv2
+from gpiozero import Button, LED
 import geocoder
 from dotenv import load_dotenv
 import requests
 from collections import deque
+import numpy as np
+import qrcode
+from io import BytesIO
+from aiortc import RTCPeerConnection, VideoStreamTrack, RTCSessionDescription, AudioStreamTrack
+import pyaudio
+import threading
+import queue
+from av import VideoFrame
+import asyncio
+import json
 
 # Check if running on Raspberry Pi
 if platform.machine() not in ['armv7l', 'aarch64']:
@@ -25,6 +35,7 @@ load_dotenv()
 
 DEVICE_ID = os.getenv("DEVICE_ID", "raspi")
 HELP_PIN = int(os.getenv("HELP_BUTTON_PIN", "17"))
+LED_PIN = int(os.getenv("LED_PIN", "27"))
 PORT = int(os.getenv("STREAM_PORT", "8000"))
 
 # Sync configuration
@@ -52,23 +63,80 @@ else:
 app = Flask(__name__)
 CORS(app)
 
-# ---------------- CAMERA ---------------- #
+# ---------------- CAMERA & AI ---------------- #
 
-camera = Camera()
+camera = cv2.VideoCapture(0)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 recording_lock = threading.Lock()
 is_recording = False
 latest_frame = None
+last_motion_time = 0
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+# Event tracking
+events = deque(maxlen=100)  # Store recent events
+
+def detect_event(frame):
+    global last_motion_time
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    motion = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+    people, _ = hog.detectMultiScale(frame, winStride=(8,8))
+
+    event = False
+    reason = None
+
+    if motion > 150:
+        if len(people) > 0:
+            event = True
+            reason = "motion+person"
+        elif time.time() - last_motion_time > 10:
+            event = True
+            reason = "motion"
+
+    if event:
+        last_motion_time = time.time()
+        events.append({
+            "timestamp": int(time.time()),
+            "reason": reason,
+            "people_count": len(people),
+            "motion_level": motion
+        })
+
+    return event, reason, len(people)
 
 def capture_preview_loop():
     global latest_frame
-    camera.start_preview()
     while True:
-        try:
-            frame = camera.capture_array()
+        ret, frame = camera.read()
+        if ret:
             latest_frame = frame
-        except:
-            pass
-        time.sleep(0.1)
+            detect_event(frame)  # Run AI detection
+        time.sleep(0.2)  # 5 FPS for AI
+
+class CameraTrack(VideoStreamTrack):
+    def __init__(self):
+        super().__init__()
+        self.frame = None
+
+    async def recv(self):
+        pts, time_base = await self.next_timestamp()
+        if latest_frame is not None:
+            frame = VideoFrame.from_ndarray(latest_frame, format="bgr24")
+            frame.pts = pts
+            frame.time_base = time_base
+            return frame
+        else:
+            # Return a blank frame if no latest_frame
+            blank = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame = VideoFrame.from_ndarray(blank, format="bgr24")
+            frame.pts = pts
+            frame.time_base = time_base
+            return frame
+
+pcs = set()  # Peer connections
 
 def record_video(duration=10):
     global is_recording
@@ -84,11 +152,14 @@ def record_video(duration=10):
 
     try:
         print("🎥 Recording video...")
-        camera.start_recording(filepath)
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(filepath, fourcc, 20.0, (640, 480))
         start_time = time.time()
         while is_recording and (time.time() - start_time) < duration:
-            time.sleep(0.1)
-        camera.stop_recording()
+            if latest_frame is not None:
+                out.write(latest_frame)
+            time.sleep(0.05)
+        out.release()
         print("✅ Saved locally:", filepath)
 
         # Queue for upload
@@ -281,11 +352,16 @@ def start_sync_loop():
         threading.Thread(target=sync_loop, daemon=True).start()
         print("Started sync loop")
 
-# ---------------- BUTTON ---------------- #
+# ---------------- LED & BUTTON ---------------- #
+
+led = LED(LED_PIN)
 
 def on_help_pressed():
     print("🆘 BUTTON PRESSED")
+    led.on()
     threading.Thread(target=record_video, daemon=True).start()
+    time.sleep(0.5)
+    led.off()
 
 Button(HELP_PIN).when_pressed = on_help_pressed
 
@@ -305,8 +381,26 @@ def demo():
         "status": "Demo Mode Active" if DEMO_MODE else "Production Mode",
         "device": DEVICE_ID,
         "uploads_pending": len(upload_queue),
-        "sync": sync_enabled
+        "sync": sync_enabled,
+        "events": list(events)[-10:],  # Last 10 events
+        "online": True
     })
+
+@app.route("/events")
+def get_events():
+    return jsonify(list(events))
+
+@app.route("/qr")
+def get_qr():
+    url = f"{SYNC_BASE_URL}/device/{DEVICE_ID}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill='black', back_color='white')
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    return Response(buf.getvalue(), mimetype='image/png')
 
 @app.route("/wifi/scan")
 def wifi_scan():
@@ -380,18 +474,61 @@ def stream():
     def gen():
         while True:
             if latest_frame is not None:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" +
-                    latest_frame +
-                    b"\r\n"
-                )
+                ret, jpeg = cv2.imencode('.jpg', latest_frame)
+                if ret:
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" +
+                        jpeg.tobytes() +
+                        b"\r\n"
+                    )
             time.sleep(0.1)
 
     return Response(
         gen(),
         mimetype="multipart/x-mixed-replace; boundary=frame"
     )
+
+@app.route("/webrtc/offer", methods=["POST"])
+def webrtc_offer():
+    params = request.json
+    offer = RTCSessionDescription(sdp=params["sdp"], type="offer")
+
+    pc = RTCPeerConnection()
+    pcs.add(pc)
+
+    @pc.on("connectionstatechange")
+    async def on_connectionstatechange():
+        if pc.connectionState == "failed":
+            await pc.close()
+            pcs.discard(pc)
+
+    pc.addTrack(CameraTrack())
+    # TODO: Add audio track
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(pc.setRemoteDescription(offer))
+    answer = loop.run_until_complete(pc.createAnswer())
+    loop.run_until_complete(pc.setLocalDescription(answer))
+
+    return jsonify({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
+
+@app.route("/command/<action>", methods=["POST"])
+def command(action):
+    if action == "flash":
+        led.on()
+        time.sleep(1)
+        led.off()
+        return jsonify({"status": "flashed"})
+    elif action == "record":
+        threading.Thread(target=record_video, daemon=True).start()
+        return jsonify({"status": "recording_started"})
+    elif action == "locate":
+        sync_location()
+        return jsonify({"status": "location_synced"})
+    else:
+        return jsonify({"error": "unknown_command"}), 400
 
 # ---------------- MAIN ---------------- #
 

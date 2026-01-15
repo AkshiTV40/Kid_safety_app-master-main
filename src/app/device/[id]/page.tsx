@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Play, Square, QrCode, Activity, Zap, MapPin, Camera } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function DevicePage() {
   const params = useParams();
@@ -13,15 +14,34 @@ export default function DevicePage() {
   const [status, setStatus] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [device, setDevice] = useState<any>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
 
-  const RPI_URL = process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000";
+  const RPI_URL = device?.ip_address ? `http://${device.ip_address}:${device.port || 8000}` : null;
 
   useEffect(() => {
+    const fetchDevice = async () => {
+      if (!supabase) return;
+      const { data, error } = await supabase
+        .from('devices')
+        .select('*')
+        .eq('device_id', deviceId)
+        .single();
+      if (!error && data) {
+        setDevice(data);
+      }
+    };
+
+    fetchDevice();
+  }, [deviceId, supabase]);
+
+  useEffect(() => {
+    if (!RPI_URL) return;
+
     const fetchStatus = async () => {
       try {
-        const res = await fetch(`${RPI_URL}/demo`);
+        const res = await fetch(`${RPI_URL}/status`);
         const data = await res.json();
         setStatus(data);
       } catch (err) {
@@ -29,54 +49,18 @@ export default function DevicePage() {
       }
     };
 
-    const fetchEvents = async () => {
-      try {
-        const res = await fetch(`${RPI_URL}/events`);
-        const data = await res.json();
-        setEvents(data);
-      } catch (err) {
-        console.error('Failed to fetch events:', err);
-      }
-    };
-
     fetchStatus();
-    fetchEvents();
 
     const interval = setInterval(() => {
       fetchStatus();
-      fetchEvents();
     }, 5000);
 
     return () => clearInterval(interval);
   }, [RPI_URL]);
 
-  const startWebRTC = async () => {
-    try {
-      const pc = new RTCPeerConnection();
-      pc.ontrack = (event) => {
-        if (event.track.kind === 'video' && videoRef.current) {
-          videoRef.current.srcObject = event.streams[0];
-        }
-        // Audio will be handled automatically
-      };
-
-      // Request both video and audio
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      pc.addTransceiver('audio', { direction: 'recvonly' });
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      const response = await fetch(`${RPI_URL}/webrtc/offer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sdp: offer.sdp, type: offer.type }),
-      });
-
-      const answer = await response.json();
-      await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    } catch (err) {
-      console.error('WebRTC error:', err);
+  const startStream = () => {
+    if (videoRef.current && RPI_URL) {
+      videoRef.current.src = `${RPI_URL}/camera`;
     }
   };
 
@@ -85,7 +69,7 @@ export default function DevicePage() {
       const res = await fetch(`${RPI_URL}/record`, { method: 'POST' });
       const data = await res.json();
       setIsRecording(true);
-      setTimeout(() => setIsRecording(false), 10000);
+      setTimeout(() => setIsRecording(false), 120000);
     } catch (err) {
       console.error('Record error:', err);
     }
@@ -127,12 +111,12 @@ export default function DevicePage() {
               className="w-full h-64 bg-black rounded"
             />
             <div className="flex flex-wrap gap-2 mt-4">
-              <Button onClick={startWebRTC}>
+              <Button onClick={startStream}>
                 Start Live Stream
               </Button>
               <Button onClick={handleRecord} variant="outline">
                 {isRecording ? <Square className="h-4 w-4 mr-2" /> : <Camera className="h-4 w-4 mr-2" />}
-                Record (10s)
+                Record (120s)
               </Button>
               <Button onClick={() => sendCommand('flash')} variant="outline">
                 <Zap className="h-4 w-4 mr-2" />

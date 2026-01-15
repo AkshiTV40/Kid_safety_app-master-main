@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { user_id, device_id, name, type = 'rpi', is_online = true, location } = body;
+    const { user_id, device_id, name, type = 'rpi', is_online = true, location, ip_address, port } = body;
 
     if (!user_id || !device_id) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -23,7 +23,9 @@ export async function POST(req: Request) {
         type,
         last_seen: new Date().toISOString(),
         is_online,
-        location
+        location,
+        ip_address,
+        port
       }, {
         onConflict: 'user_id,device_id'
       });

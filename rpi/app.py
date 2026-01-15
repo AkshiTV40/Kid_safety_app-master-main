@@ -4,6 +4,7 @@ import time
 import threading
 import platform
 import subprocess
+import socket
 from datetime import datetime
 from flask import Flask, Response, jsonify, send_from_directory, request, abort
 from flask_cors import CORS
@@ -46,6 +47,19 @@ PREVIEW_FILE = os.path.join(BASE_DIR, "preview.jpg")
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 UPLOAD_URL = os.getenv("UPLOAD_URL", f"{SYNC_BASE_URL}/api/recordings/upload")
+
+def get_local_ip():
+    """Get the local IP address of the RPi"""
+    try:
+        # Create a socket to get the local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # Connect to Google DNS
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception as e:
+        print("Failed to get local IP:", e)
+        return "127.0.0.1"
 
 sync_enabled = bool(SYNC_BASE_URL and USER_ID)
 if sync_enabled:
@@ -163,13 +177,16 @@ def sync_device_status():
 
     try:
         loc = get_location()
+        ip = get_local_ip()
         data = {
             "user_id": USER_ID,
             "device_id": DEVICE_ID,
             "name": f"Raspberry Pi ({DEVICE_ID})",
             "type": "rpi",
             "is_online": True,
-            "location": loc
+            "location": loc,
+            "ip_address": ip,
+            "port": PORT
         }
         response = requests.post(f"{SYNC_BASE_URL}/api/devices/sync", json=data)
         if response.status_code == 200:

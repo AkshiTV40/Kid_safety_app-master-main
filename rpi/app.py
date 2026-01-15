@@ -5,23 +5,16 @@ import threading
 import platform
 import subprocess
 from datetime import datetime
-from flask import Flask, Response, jsonify, send_from_directory, request
+from flask import Flask, Response, jsonify, send_from_directory, request, abort
 from flask_cors import CORS
-import cv2
+from picamzero import Camera
 from gpiozero import Button, LED
 import geocoder
 from dotenv import load_dotenv
 import requests
 from collections import deque
-import numpy as np
 import qrcode
 from io import BytesIO
-from aiortc import RTCPeerConnection, VideoStreamTrack, RTCSessionDescription, AudioStreamTrack
-import pyaudio
-import threading
-import queue
-from av import VideoFrame
-import asyncio
 import json
 
 # Check if running on Raspberry Pi
@@ -48,6 +41,8 @@ upload_queue = deque()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
+PREVIEW_FILE = os.path.join(BASE_DIR, "preview.jpg")
+
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 UPLOAD_URL = os.getenv("UPLOAD_URL", f"{SYNC_BASE_URL}/api/recordings/upload")
@@ -63,112 +58,49 @@ else:
 app = Flask(__name__)
 CORS(app)
 
-# ---------------- CAMERA & AI ---------------- #
+# ---------------- CAMERA ---------------- #
 
-camera = cv2.VideoCapture(0)
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+camera = Camera()
+camera.resolution = (1280, 720)
+camera.framerate = 24
+
 recording_lock = threading.Lock()
 is_recording = False
-latest_frame = None
-last_motion_time = 0
-hog = cv2.HOGDescriptor()
-hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
-# Event tracking
-events = deque(maxlen=100)  # Store recent events
-
-def detect_event(frame):
-    global last_motion_time
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    motion = cv2.Laplacian(gray, cv2.CV_64F).var()
-
-    people, _ = hog.detectMultiScale(frame, winStride=(8,8))
-
-    event = False
-    reason = None
-
-    if motion > 150:
-        if len(people) > 0:
-            event = True
-            reason = "motion+person"
-        elif time.time() - last_motion_time > 10:
-            event = True
-            reason = "motion"
-
-    if event:
-        last_motion_time = time.time()
-        events.append({
-            "timestamp": int(time.time()),
-            "reason": reason,
-            "people_count": len(people),
-            "motion_level": motion
-        })
-
-    return event, reason, len(people)
-
-def capture_preview_loop():
-    global latest_frame
+def preview_loop():
     while True:
-        ret, frame = camera.read()
-        if ret:
-            latest_frame = frame
-            detect_event(frame)  # Run AI detection
-        time.sleep(0.2)  # 5 FPS for AI
+        try:
+            camera.capture_image(PREVIEW_FILE)
+        except Exception as e:
+            print("Preview error:", e)
+        time.sleep(0.15)
 
-class CameraTrack(VideoStreamTrack):
-    def __init__(self):
-        super().__init__()
-        self.frame = None
-
-    async def recv(self):
-        pts, time_base = await self.next_timestamp()
-        if latest_frame is not None:
-            frame = VideoFrame.from_ndarray(latest_frame, format="bgr24")
-            frame.pts = pts
-            frame.time_base = time_base
-            return frame
-        else:
-            # Return a blank frame if no latest_frame
-            blank = np.zeros((480, 640, 3), dtype=np.uint8)
-            frame = VideoFrame.from_ndarray(blank, format="bgr24")
-            frame.pts = pts
-            frame.time_base = time_base
-            return frame
-
-pcs = set()  # Peer connections
-
-def record_video(duration=10):
+def record_video(duration=120):
     global is_recording
-
     with recording_lock:
         if is_recording:
-            print("⚠️ Already recording")
             return
         is_recording = True
+        led.on()
 
     filename = f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
     filepath = os.path.join(VIDEOS_DIR, filename)
 
     try:
-        print("🎥 Recording video...")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(filepath, fourcc, 20.0, (640, 480))
-        start_time = time.time()
-        while is_recording and (time.time() - start_time) < duration:
-            if latest_frame is not None:
-                out.write(latest_frame)
-            time.sleep(0.05)
-        out.release()
-        print("✅ Saved locally:", filepath)
+        print("🎥 Recording:", filename)
+        camera.start_recording(filepath)
+        time.sleep(duration)
+        camera.stop_recording()
+        print("✅ Saved:", filename)
 
         # Queue for upload
         upload_queue.append(filepath)
 
     except Exception as e:
-        print("❌ Error:", e)
+        print("❌ Recording error:", e)
     finally:
         is_recording = False
+        led.off()
 
 # ---------------- LOCATION & SYNC ---------------- #
 
@@ -368,27 +300,27 @@ Button(HELP_PIN).when_pressed = on_help_pressed
 # ---------------- ROUTES ---------------- #
 
 @app.route("/")
-def index():
-    return jsonify({"status": "running", "device": DEVICE_ID})
+def home():
+    return """
+    <h1>📷 Raspberry Pi Camera Demo</h1>
+    <ul>
+        <li><a href="/camera">Live Camera</a></li>
+        <li><a href="/videos">Recorded Videos</a></li>
+        <li><a href="/status">Status</a></li>
+        <li><a href="/health">Health</a></li>
+    </ul>
+    """
 
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
 
-@app.route("/demo")
-def demo():
-    return jsonify({
-        "status": "Demo Mode Active" if DEMO_MODE else "Production Mode",
-        "device": DEVICE_ID,
-        "uploads_pending": len(upload_queue),
-        "sync": sync_enabled,
-        "events": list(events)[-10:],  # Last 10 events
-        "online": True
-    })
-
-@app.route("/events")
-def get_events():
-    return jsonify(list(events))
+@app.route("/status")
+def status():
+    return {
+        "recording": is_recording,
+        "preview_exists": os.path.exists(PREVIEW_FILE)
+    }
 
 @app.route("/qr")
 def get_qr():
@@ -460,59 +392,35 @@ def list_videos():
         [f for f in os.listdir(VIDEOS_DIR) if f.endswith(".mp4")],
         reverse=True
     )
-    return jsonify([
-        {"name": f, "url": f"/videos/{f}"}
-        for f in files
-    ])
+    if not files:
+        return "No videos yet."
+    return "<br>".join(f'<a href="/videos/{f}">{f}</a>' for f in files)
 
-@app.route("/videos/<filename>")
-def get_video(filename):
-    return send_from_directory(VIDEOS_DIR, filename)
+@app.route("/videos/<name>")
+def get_video(name):
+    if not name.endswith(".mp4"):
+        abort(404)
+    return send_from_directory(VIDEOS_DIR, name)
 
-@app.route("/camera/stream")
-def stream():
+@app.route("/camera")
+def camera_stream():
     def gen():
         while True:
-            if latest_frame is not None:
-                ret, jpeg = cv2.imencode('.jpg', latest_frame)
-                if ret:
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" +
-                        jpeg.tobytes() +
-                        b"\r\n"
-                    )
-            time.sleep(0.1)
+            if os.path.exists(PREVIEW_FILE):
+                with open(PREVIEW_FILE, "rb") as f:
+                    frame = f.read()
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" +
+                    frame + b"\r\n"
+                )
+            time.sleep(0.15)
 
     return Response(
         gen(),
         mimetype="multipart/x-mixed-replace; boundary=frame"
     )
 
-@app.route("/webrtc/offer", methods=["POST"])
-def webrtc_offer():
-    params = request.json
-    offer = RTCSessionDescription(sdp=params["sdp"], type="offer")
-
-    pc = RTCPeerConnection()
-    pcs.add(pc)
-
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
-
-    pc.addTrack(CameraTrack())
-    # TODO: Add audio track
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(pc.setRemoteDescription(offer))
-    answer = loop.run_until_complete(pc.createAnswer())
-    loop.run_until_complete(pc.setLocalDescription(answer))
-
-    return jsonify({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
 
 @app.route("/command/<action>", methods=["POST"])
 def command(action):
@@ -533,9 +441,8 @@ def command(action):
 # ---------------- MAIN ---------------- #
 
 if __name__ == "__main__":
-    threading.Thread(target=capture_preview_loop, daemon=True).start()
+    threading.Thread(target=preview_loop, daemon=True).start()
     threading.Thread(target=upload_worker, daemon=True).start()  # Start upload worker
-    threading.Thread(target=wifi_manager, daemon=True).start()  # Start WiFi manager
     start_sync_loop()  # Start background sync
-    print("🚀 Raspberry Pi backend running")
+    print("🚀 Raspberry Pi demo backend running")
     app.run(host="0.0.0.0", port=PORT, threaded=True)

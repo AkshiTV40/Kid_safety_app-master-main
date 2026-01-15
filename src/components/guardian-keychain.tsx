@@ -222,25 +222,35 @@ export default function GuardianKeychain() {
     }
   };
 
-  // Debug SOS behavior: simulate call and notify guardians
+  // SOS behavior: send help request and notify guardians
   const startCall = async () => {
-    // Try to send local guardian notifications like before
     setIsLoading(true);
     try {
       // ensure location tracking runs when SOS is initiated
       startLocationTracking();
-      toast({
-        title: 'Notifying guardians',
-        description: `Notifying ${guardianCount} guardian${guardianCount !== 1 ? 's' : ''}.`,
-      });
       // Attempt to start analysis in background if media available
       startAnalysis();
+
+      // Send help request to Firebase
+      const { requestHelp } = await import('@/lib/firebase');
+      const message = location ? `SOS! Location: ${location.latitude}, ${location.longitude}` : 'SOS! Help needed!';
+      await requestHelp('child-1', { message });
+
+      toast({
+        title: 'SOS Alert Sent',
+        description: `Notifying ${guardianCount} guardian${guardianCount !== 1 ? 's' : ''} and emergency services.`,
+      });
+    } catch (e) {
+      console.error('Failed to send SOS', e);
+      toast({
+        variant: 'destructive',
+        title: 'SOS Failed',
+        description: 'Failed to send emergency alert.',
+      });
     } finally {
       setIsLoading(false);
     }
 
-    // Debug mode: simulate SOS call
-    alert('SOS triggered in debug mode - no actual 911 call made');
     setIsCalling911(true);
   };
 

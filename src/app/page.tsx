@@ -5,11 +5,36 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Logo } from '@/components/logo';
-import { Smartphone, ShieldCheck, Zap, Users } from 'lucide-react';
+import { Smartphone, ShieldCheck, Zap, Users, MapPin, Video } from 'lucide-react';
 import Image from 'next/image';
+import LeafletMap from '../components/leaflet-map';
+
+type Location = {
+  id: number;
+  user_id: string;
+  device_id: string;
+  latitude: number;
+  longitude: number;
+  timestamp: number;
+  method: string;
+};
+
+type Device = {
+  id: string;
+  user_id: string;
+  device_id: string;
+  name: string;
+  type: string;
+  last_seen: string;
+  is_online: boolean;
+  location: any;
+};
 
 export default function Home() {
   const [rpiStatus, setRpiStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [latestLocation, setLatestLocation] = useState<Location | null>(null);
 
   useEffect(() => {
     const check = async () => {
@@ -23,6 +48,33 @@ export default function Home() {
     };
     check();
     const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [locRes, devRes] = await Promise.all([
+          fetch('/api/locations'),
+          fetch('/api/devices')
+        ]);
+        if (locRes.ok) {
+          const locData = await locRes.json();
+          setLocations(locData);
+          if (locData.length > 0) {
+            setLatestLocation(locData[0]);
+          }
+        }
+        if (devRes.ok) {
+          const devData = await devRes.json();
+          setDevices(devData);
+        }
+      } catch (e) {
+        console.error('Failed to fetch data', e);
+      }
+    };
+    fetchData();
+    const interval = setInterval(fetchData, 60000); // Sync every minute
     return () => clearInterval(interval);
   }, []);
 
@@ -133,6 +185,64 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {/* Dashboard Section */}
+      {rpiStatus === 'connected' && (
+        <section className="w-full py-12 md:py-24 lg:py-32 border-t bg-muted/50">
+          <div className="container px-4 md:px-6 max-w-screen-2xl">
+            <div className="space-y-8">
+              <div className="text-center">
+                <h2 className="text-3xl font-bold tracking-tighter sm:text-5xl">Live Dashboard</h2>
+                <p className="text-muted-foreground">Monitor your RPi in real-time</p>
+              </div>
+              <div className="grid gap-6 md:grid-cols-2">
+                {/* Live Feed */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Video className="h-5 w-5" />
+                      Live Video Feed
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <img
+                      src={`${process.env.NEXT_PUBLIC_RPI_URL || "http://localhost:8000"}/camera/stream`}
+                      alt="Live Stream"
+                      className="w-full border rounded"
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* Location Map */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <MapPin className="h-5 w-5" />
+                      RPi Location
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-64">
+                      <LeafletMap
+                        center={latestLocation ? [latestLocation.latitude, latestLocation.longitude] : [0, 0]}
+                        zoom={latestLocation ? 15 : 2}
+                        marker={latestLocation ? { lat: latestLocation.latitude, lng: latestLocation.longitude } : null}
+                        style={{ height: '100%' }}
+                      />
+                    </div>
+                    {latestLocation && (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Last updated: {new Date(latestLocation.timestamp).toLocaleString()}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <footer className="flex flex-col gap-2 sm:flex-row py-6 w-full shrink-0 items-center px-4 md:px-6 border-t">
         <p className="text-xs text-muted-foreground">&copy; 2024 Guardian Keychain. All rights reserved.</p>
       </footer>
